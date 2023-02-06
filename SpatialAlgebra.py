@@ -74,6 +74,7 @@ class Origin:
         self.rotation = None
         self.Xmat_sp_fixed = None
         self.Xmat_sp_fixed_hom = None
+        self.Xmat_sp_fixed_hom_inv = None
 
     def set_translation(self, x, y = None, z = None):
         self.translation = Translation(x,y,z)
@@ -89,3 +90,74 @@ class Origin:
             self.Xmat_sp_fixed_hom = self.rotation.E_hom * self.translation.tx_hom
             self.Xmat_sp_fixed_hom_inv = self.rotation.E_hom_inv * self.translation.tx_hom_inv
 
+class Quaternion_Tools:
+    def __init__(self):
+        pass
+        
+    def quat_to_rpy(self, q0, q1, q2, q3):
+        r = np.atan2(2*q2*q3+2*q0*q1, q3^2-q2^2-q1^2+q0^2)
+        p = -np.asin(2*q1*q3-2*q0*q2)
+        y = np.atan2(2*q1*q2+2*q0*q3, q1^2+q0^2-q3^2-q2^2)
+        return (r,p,y)
+
+    def quat_to_rot_sp(self, q0, q1, q2, q3):
+        # to match pinnochio ordering of quaternion
+        temp = q0
+        q0 = q1
+        q1 = q2
+        q2 = q3
+        q3 = temp
+
+        total = sp.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
+        q0 = q0/total
+        q1 = q1/total
+        q2 = q2/total
+        q3 = q3/total
+
+        q0s = q0*q0
+        q1s = q1*q1;
+        q2s = q2*q2;
+        q3s = q3*q3;
+        q01 = q0*q1;
+        q02 = q0*q2;
+        q03 = q0*q3;
+        q12 = q1*q2;
+        q13 = q1*q3;
+        q23 = q2*q3;
+
+        E = 2 * sp.Matrix([[0.5 - (q0s + q1s), q12 + q03,         q13 - q02],
+                           [q12 - q03,         0.5 - (q0s + q2s), q23 + q01],
+                           [q13 + q02,         q23 - q01,         0.5 - (q0s + q3s)]])
+        return E
+
+
+        # E = 2 * sp.Matrix([[(q0s + q1s) - 0.5, q12 + q03,         q13 - q02],
+        #                    [q12 - q03,         (q0s + q2s) - 0.5, q23 + q01],
+        #                    [q13 + q02,         q23 - q01,         (q0s + q3s) - 0.5]])
+        # return E.transpose()
+
+    def quat_to_rot_np(self, q0, q1, q2, q3):
+        total = np.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
+        q0 = q0/total
+        q1 = q1/total
+        q2 = q2/total
+        q3 = q3/total
+
+        q0s = q0*q0
+        q1s = q1*q1;
+        q2s = q2*q2;
+        q3s = q3*q3;
+        q01 = q0*q1;
+        q02 = q0*q2;
+        q03 = q0*q3;
+        q12 = q1*q2;
+        q13 = q1*q3;
+        q23 = q2*q3;
+
+        E = 2 * np.matrix([[q0s + q1s - 0.5, q12 + q03,       q13 - q02],
+                           [q12 - q03,       q0s + q2s - 0.5, q23 + q01],
+                           [q13 + q02,       q23 - q01,       q0s + q3s - 0.5]])
+        return E
+
+    def rpy_to_quat(self, r, p, y):
+        pass

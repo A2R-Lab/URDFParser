@@ -1,18 +1,50 @@
 from .Link import Link
 from .Joint import Joint
+from .SpatialAlgebra import Quaternion_Tools
 
 class Robot:
     # initialization
-    def __init__(self, name):
+    def __init__(self, name, floating_base = False, using_quaternion = True):
         self.name = name
+        self.floating_base = floating_base
         self.links = []
         self.joints = []
+        self.using_quaternion = using_quaternion
 
     def next_none(self, iterable):
         try:
             return next(iterable)
         except:
             return None
+
+    def get_joint_index_q(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                return [0,1,2,3,4,5,6] if self.using_quaternion else [0,1,2,3,4,5]
+            else:
+                return joint_id + (6 if self.using_quaternion else 5)
+        else:
+            return joint_id
+
+    def get_joint_index_v(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                return [0,1,2,3,4,5]
+            else:
+                return joint_id + 5
+        else:
+            return joint_id
+
+    def get_joint_index_f(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                # TODO WHY IS THIS THE CASE?
+                return [3,4,5,0,1,2]
+            else:
+                return joint_id + 5
+        else:
+            return joint_id
+
 
     #################
     #    Setters    #
@@ -35,13 +67,13 @@ class Robot:
     #########################
 
     def get_num_pos(self):
-        return self.get_num_joints()
+        return self.get_num_vel() + (1 if (self.floating_base and self.using_quaternion) else 0)
 
     def get_num_vel(self):
-        return self.get_num_joints()
+        return sum([joint.get_num_dof() for joint in self.joints])
 
-    def get_num_cntrl(self):
-        return self.get_num_joints()
+    def get_num_bodies(self):
+        return self.get_num_links_effective()
 
     def get_name(self):
         return self.name
@@ -140,9 +172,6 @@ class Robot:
     def get_joint_by_parent_child_name(self, parent_name, child_name):
         return self.next_none(filter(lambda fjoint: fjoint.parent == parent_name and fjoint.child == child_name, self.joints))
 
-    def get_damping_by_id(self, jid):
-        return self.get_joint_by_id(jid).get_damping()
-
     ##############
     #    Link    #
     ##############
@@ -152,7 +181,7 @@ class Robot:
 
     def get_num_links_effective(self):
         # subtracting base link from total # of links
-        return get_num_links() - 1
+        return self.get_num_links() - 1
 
     def get_link_by_id(self, lid):
         return self.next_none(filter(lambda flink: flink.lid == lid, self.links))
