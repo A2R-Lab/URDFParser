@@ -24,8 +24,8 @@ pip3 install -r requirements.txt
 The main API is as follows where **XXX** can be replaced by:
 + **joint**: a joint object (see API below)
 + **link**: a link object (see API below)
-+ **Xmat**: a sympy transformation matrix with one free variable as defined by its joint
-+ **Xmat_Func**: a function that returns a numpy matrix when passed a value for the free variable
++ **Xmat**: a sympy transformation matrix with one free variable as defined by its joint (also 4x4 homogenous version)
++ **Xmat_Func**: a function that returns a numpy matrix when passed a value for the free variable (also 4x4 homogenous version)
 + **Imat**: a numpy 6x6 inertia matrix
 + **S**: a numpy 6x1 motion subspace matrix
 
@@ -103,8 +103,11 @@ get_bfs_level()
 get_parent()
 get_child()
 # get the Xmat or Xmat_Func for this joint as defined above
+# also get the 4x4 homogenous transformation matrix
 get_transformation_matrix()
 get_transformation_matrix_function()
+get_transformation_matrix_hom()
+get_transformation_matrix_hom_function()
 # get the S for this joint as defined above
 get_joint_subspace()
 # get the velocity damping coefficent for this joint

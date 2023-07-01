@@ -17,6 +17,8 @@ class Joint:
         self.theta = sp.symbols("theta") # Free joint variable
         self.Xmat_sp = None      # Sympy X matrix placeholder
         self.Xmat_sp_free = None # Sympy X_free matrix placeholder
+        self.Xmat_sp_hom = None      # Sympy X homogenous 4x4 matrix placeholder
+        self.Xmat_sp_hom_free = None # Sympy X_free homogenous 4x4  matrix placeholder
         self.Smat_sp = None      # Sympy S matrix placeholder (usually a vector)
         self.damping = 0         # damping placeholder
 
@@ -53,25 +55,32 @@ class Joint:
         if self.jtype == 'revolute':
             if axis[2] == 1:
                 self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rz(self.theta))
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rz(self.theta))
                 self.S = np.array([0,0,1,0,0,0])
             elif axis[1] == 1:
                 self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.ry(self.theta))
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.ry(self.theta))
                 self.S = np.array([0,1,0,0,0,0])
             elif axis[0] == 1:
                 self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rx(self.theta))
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rx(self.theta))
                 self.S = np.array([1,0,0,0,0,0])
         elif self.jtype == 'prismatic':
             if axis[2] == 1:
                 self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,0,self.theta))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,0,self.theta)
                 self.S = np.array([0,0,0,0,0,1])
             elif axis[1] == 1:
                 self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,self.theta,0))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,self.theta,0)
                 self.S = np.array([0,0,0,0,1,0])
             elif axis[0] == 1:
                 self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(self.theta,0,0))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(self.theta,0,0)
                 self.S = np.array([0,0,0,1,0,0])
         elif self.jtype == 'fixed':
             self.Xmat_sp_free = sp.eye(6)
+            self.Xmat_sp_hom_free = sp.eye(4)
             self.S = np.array([0,0,0,0,0,0])
         else:
             print('Only revolute and fixed joints currently supported!')
@@ -79,12 +88,31 @@ class Joint:
         self.Xmat_sp = self.Xmat_sp_free * self.origin.Xmat_sp_fixed
         # remove numerical noise (e.g., URDF's often specify angles as 3.14 or 3.14159 but that isn't exactly PI)
         self.Xmat_sp = sp.nsimplify(self.Xmat_sp, tolerance=1e-6, rational=True).evalf()
+        # homogenous transform needs to "sum" translation and rotation
+        self.Xmat_sp_hom = sp.eye(4)
+        self.Xmat_sp_hom[:3,:3] = (self.Xmat_sp_hom_free[:3,:3] * self.origin.Xmat_sp_hom_fixed[:3,:3]).transpose()
+        self.Xmat_sp_hom[:3,3] = self.Xmat_sp_hom_free[:3,3] + self.origin.Xmat_sp_hom_fixed[:3,3]
+        self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
+        # and derivative
+        self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom,self.theta)
 
     def get_transformation_matrix_function(self):
         return sp.utilities.lambdify(self.theta, self.Xmat_sp, 'numpy')
 
     def get_transformation_matrix(self):
         return self.Xmat_sp
+
+    def get_transformation_matrix_hom_function(self):
+        return sp.utilities.lambdify(self.theta, self.Xmat_sp_hom, 'numpy')
+
+    def get_transformation_matrix_hom(self):
+        return self.Xmat_sp_hom
+
+    def get_dtransformation_matrix_hom_function(self):
+        return sp.utilities.lambdify(self.theta, self.dXmat_sp_hom, 'numpy')
+
+    def get_dtransformation_matrix_hom(self):
+        return self.dXmat_sp_hom
 
     def get_joint_subspace(self):
         return self.S

@@ -102,6 +102,14 @@ class Robot:
     def get_max_bfs_width(self):
         return max([len(self.get_ids_by_bfs_level(level)) for level in range(self.get_max_bfs_level() + 1)])
 
+    def get_is_leaf_node(self, jid):
+        return len(self.get_subtree_by_id(jid)) == 1
+
+    def get_leaf_nodes(self):
+        return list(filter(lambda jid: self.get_is_leaf_node(jid), range(self.get_num_joints())))
+
+    def get_total_leaf_nodes(self):
+        return len(self.get_leaf_nodes())
 
     ###############
     #    Joint    #
@@ -224,6 +232,106 @@ class Robot:
 
     def get_Xmat_Funcs_dict_by_name(self):
         return {joint.name:joint.get_transformation_matrix_function() for joint in self.joints}
+
+    ##################
+    #    XMAT_hom    #
+    ##################
+
+    def get_Xmat_hom_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_transformation_matrix_hom()
+
+    def get_Xmat_hom_by_name(self, name):
+        return self.get_joint_by_name(name).get_transformation_matrix_hom()
+
+    def get_Xmats_hom_by_bfs_level(self, level):
+        return [joint.get_transformation_matrix_hom() for joint in self.get_joints_by_bfs_level(level)]
+
+    def get_Xmats_hom_ordered_by_id(self, reverse = False):
+        return [joint.get_transformation_matrix_hom() for joint in self.get_joints_ordered_by_id(reverse)]
+
+    def get_Xmats_hom_ordered_by_name(self, reverse = False):
+        return [joint.get_transformation_matrix_hom() for joint in self.get_joints_ordered_by_name(reverse)]
+
+    def get_Xmats_hom_dict_by_id(self):
+        return {joint.jid:joint.get_transformation_matrix_hom() for joint in self.joints}
+
+    def get_Xmats_hom_dict_by_name(self):
+        return {joint.name:joint.get_transformation_matrix_hom() for joint in self.joints}
+
+    #######################
+    #    Xmat_hom_Func    #
+    #######################
+
+    def get_Xmat_hom_Func_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_transformation_matrix_hom_function()
+
+    def get_Xmat_hom_Func_by_name(self, name):
+        return self.get_joint_by_name(name).get_transformation_matrix_hom_function()
+
+    def get_Xmat_hom_Funcs_by_bfs_level(self, level):
+        return [joint.get_transformation_matrix_hom_function() for joint in self.get_joints_by_bfs_level(level)]
+
+    def get_Xmat_hom_Funcs_ordered_by_id(self, reverse = False):
+        return [joint.get_transformation_matrix_hom_function() for joint in self.get_joints_ordered_by_id(reverse)]
+
+    def get_Xmat_hom_Funcs_ordered_by_name(self, reverse = False):
+        return [joint.get_transformation_matrix_hom_function() for joint in self.get_joints_ordered_by_name(reverse)]
+
+    def get_Xmat_hom_Funcs_dict_by_id(self):
+        return {joint.jid:joint.get_transformation_matrix_hom_function() for joint in self.joints}
+
+    def get_Xmat_hom_Funcs_dict_by_name(self):
+        return {joint.name:joint.get_transformation_matrix_hom_function() for joint in self.joints}
+
+    ##################
+    #    dXmat_hom    #
+    ##################
+
+    def get_dXmat_hom_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_dtransformation_matrix_hom()
+
+    def get_dXmat_hom_by_name(self, name):
+        return self.get_joint_by_name(name).get_dtransformation_matrix_hom()
+
+    def get_dXmats_hom_by_bfs_level(self, level):
+        return [joint.get_dtransformation_matrix_hom() for joint in self.get_joints_by_bfs_level(level)]
+
+    def get_dXmats_hom_ordered_by_id(self, reverse = False):
+        return [joint.get_dtransformation_matrix_hom() for joint in self.get_joints_ordered_by_id(reverse)]
+
+    def get_dXmats_hom_ordered_by_name(self, reverse = False):
+        return [joint.get_dtransformation_matrix_hom() for joint in self.get_joints_ordered_by_name(reverse)]
+
+    def get_dXmats_hom_dict_by_id(self):
+        return {joint.jid:joint.get_dtransformation_matrix_hom() for joint in self.joints}
+
+    def get_dXmats_hom_dict_by_name(self):
+        return {joint.name:joint.get_dtransformation_matrix_hom() for joint in self.joints}
+
+    #######################
+    #    dXmat_hom_Func    #
+    #######################
+
+    def get_dXmat_hom_Func_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_dtransformation_matrix_hom_function()
+
+    def get_dXmat_hom_Func_by_name(self, name):
+        return self.get_joint_by_name(name).get_dtransformation_matrix_hom_function()
+
+    def get_dXmat_hom_Funcs_by_bfs_level(self, level):
+        return [joint.get_dtransformation_matrix_hom_function() for joint in self.get_joints_by_bfs_level(level)]
+
+    def get_dXmat_hom_Funcs_ordered_by_id(self, reverse = False):
+        return [joint.get_dtransformation_matrix_hom_function() for joint in self.get_joints_ordered_by_id(reverse)]
+
+    def get_dXmat_hom_Funcs_ordered_by_name(self, reverse = False):
+        return [joint.get_dtransformation_matrix_hom_function() for joint in self.get_joints_ordered_by_name(reverse)]
+
+    def get_dXmat_hom_Funcs_dict_by_id(self):
+        return {joint.jid:joint.get_dtransformation_matrix_hom_function() for joint in self.joints}
+
+    def get_dXmat_hom_Funcs_dict_by_name(self):
+        return {joint.name:joint.get_dtransformation_matrix_hom_function() for joint in self.joints}
 
     ##############
     #    IMAT    #
