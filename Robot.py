@@ -38,8 +38,7 @@ class Robot:
     def get_joint_index_f(self, joint_id):
         if self.floating_base:
             if joint_id == 0:
-                # TODO WHY IS THIS THE CASE?
-                return [3,4,5,0,1,2]
+                return [0, 1, 2, 3, 4, 5]
             else:
                 return joint_id + 5
         else:
