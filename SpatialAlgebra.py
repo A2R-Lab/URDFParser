@@ -101,7 +101,8 @@ class Quaternion_Tools:
         return (r,p,y)
 
     def quat_to_rot_sp(self, q0, q1, q2, q3):
-        # to match pinnochio ordering of quaternion
+        # GRiD uses a wxyz quaternion, convert to xyzw form for the matrix calculation
+        # using https://automaticaddison.com/how-to-convert-a-quaternion-to-a-rotation-matrix/
         temp = q0
         q0 = q1
         q1 = q2
@@ -115,26 +116,21 @@ class Quaternion_Tools:
         q3 = q3/total
 
         q0s = q0*q0
-        q1s = q1*q1;
-        q2s = q2*q2;
-        q3s = q3*q3;
-        q01 = q0*q1;
-        q02 = q0*q2;
-        q03 = q0*q3;
-        q12 = q1*q2;
-        q13 = q1*q3;
-        q23 = q2*q3;
+        q1s = q1*q1
+        q2s = q2*q2
+        q3s = q3*q3
+        q01 = q0*q1
+        q02 = q0*q2
+        q03 = q0*q3
+        q12 = q1*q2
+        q13 = q1*q3
+        q23 = q2*q3
 
-        E = 2 * sp.Matrix([[0.5 - (q0s + q1s), q12 + q03,         q13 - q02],
-                           [q12 - q03,         0.5 - (q0s + q2s), q23 + q01],
-                           [q13 + q02,         q23 - q01,         0.5 - (q0s + q3s)]])
+        E = 2 * sp.Matrix([[(q0s + q1s) - 0.5, q12 + q03,         q13 - q02],
+        [q12 - q03,         (q0s + q2s) - 0.5, q23 + q01],
+        [q13 + q02,         q23 - q01,         (q0s + q3s) - 0.5]])
+
         return E
-
-
-        # E = 2 * sp.Matrix([[(q0s + q1s) - 0.5, q12 + q03,         q13 - q02],
-        #                    [q12 - q03,         (q0s + q2s) - 0.5, q23 + q01],
-        #                    [q13 + q02,         q23 - q01,         (q0s + q3s) - 0.5]])
-        # return E.transpose()
 
     def quat_to_rot_np(self, q0, q1, q2, q3):
         total = np.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
