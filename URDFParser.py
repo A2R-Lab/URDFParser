@@ -49,8 +49,8 @@ class URDFParser:
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
             else:
-                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"].split(" ")))
-                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"].split(" ")))
+                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"].split()))
+                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"].split()))
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
@@ -78,14 +78,14 @@ class URDFParser:
                                raw_joint.find("child")["link"])
             jid += 1
             # get origin position and rotation
-            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"].split(" ")))
-            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"].split(" ")))
+            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"].split()))
+            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"].split()))
             # set joint type and axis of motion for joints if applicable
             raw_axis = raw_joint.find("axis")
             if raw_axis is None:
                 curr_joint.set_type(raw_joint["type"])
             else:
-                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"].split(" ")))
+                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"].split()))
             raw_dynamics = raw_joint.find("dynamics")
             if raw_dynamics is None:
                 curr_joint.set_damping(0)
