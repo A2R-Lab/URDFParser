@@ -461,7 +461,7 @@ class Robot:
             for dof in fb_S:
                 S_inds.append(str(dof.index(1))) # take the indices of the 1's in each column
             for jid in range(1,n):
-                S_inds.append(str(self.get_S_by_id(jid).tolist().index([1]))) # take the rest
+                S_inds.append(str(self.get_S_by_id(jid).tolist().index(1))) # take the rest
         else:
-            S_inds = [str(self.get_S_by_id(jid).tolist().index([1])) for jid in range(n)]
+            S_inds = [str(self.get_S_by_id(jid).tolist().index(1)) for jid in range(n)]
         return S_inds
