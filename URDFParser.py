@@ -11,6 +11,7 @@ class URDFParser:
         pass
     
     def parse(self, filename, floating_base = False, using_quaternion = True, alpha_tie_breaker = False):
+        Joint.floating_base = floating_base
         try:
             # parse the file
             urdf_file = open(filename, "r")

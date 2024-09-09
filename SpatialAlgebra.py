@@ -1,4 +1,5 @@
 import sympy as sp
+import numpy as np
 import copy
 
 class Translation:
@@ -13,8 +14,6 @@ class Translation:
             self.z = z
         self.rx = self.skew(self.x,self.y,self.z)
         self.Xmat_sp_fixed = self.xlt(self.rx)
-        self.tx_hom = sp.Matrix([[1,0,0,self.x],[0,1,0,self.y],[0,0,1,self.z],[0,0,0,1]])
-        self.tx_hom_inv = sp.Matrix([[1,0,0,-self.x],[0,1,0,-self.y],[0,0,1,-self.z],[0,0,0,1]])
 
     def skew(self, x, y, z):
         return sp.Matrix([[0,-z,y],[z,0,-x],[-y,x,0]])
@@ -23,6 +22,12 @@ class Translation:
         col1 = sp.Matrix.vstack(sp.eye(3), -rx)
         col2 = sp.Matrix.vstack(sp.zeros(3, 3), sp.eye(3))
         return sp.Matrix.hstack(col1, col2)
+
+    def gen_tx_hom(self, x, y, z, inv = False):
+        if inv:
+            return sp.Matrix([[1,0,0,-x],[0,1,0,-y],[0,0,1,-z],[0,0,0,1]])
+        else:
+            return sp.Matrix([[1,0,0,x],[0,1,0,y],[0,0,1,z],[0,0,0,1]])
 
 class Rotation:
     def __init__(self, r, p = None, y = None):
@@ -40,9 +45,6 @@ class Rotation:
         yaw_mat = self.rz(self.y)
         self.E = roll_mat * pitch_mat * yaw_mat
         self.Xmat_sp_fixed = self.rot(self.E)
-        self.E_hom = sp.Matrix.vstack(copy.deepcopy(self.E),sp.Matrix([[0,0,0]]))
-        self.E_hom = sp.Matrix.hstack(self.E_hom,sp.Matrix([[0],[0],[0],[1]]))
-        self.E_hom_inv = self.E_hom.transpose()
 
     def rx(self, theta):
         c = sp.cos(theta)
@@ -68,13 +70,16 @@ class Rotation:
         col2 = sp.Matrix.vstack(z, E)
         return sp.Matrix.hstack(col1, col2)
 
+    def rot_hom(self, E):
+        left = sp.Matrix.vstack(E,sp.Matrix([[0,0,0]]))
+        return sp.Matrix.hstack(left,sp.Matrix([[0],[0],[0],[1]]))
+
 class Origin:
     def __init__(self):
         self.translation = None
         self.rotation = None
         self.Xmat_sp_fixed = None
-        self.Xmat_sp_fixed_hom = None
-        self.Xmat_sp_fixed_hom_inv = None
+        self.Xmat_sp_hom_fixed = None
 
     def set_translation(self, x, y = None, z = None):
         self.translation = Translation(x,y,z)
@@ -87,8 +92,17 @@ class Origin:
             print("[!Error] First set the origin translation and rotation!")
         else:
             self.Xmat_sp_fixed =  self.rotation.Xmat_sp_fixed * self.translation.Xmat_sp_fixed
-            self.Xmat_sp_fixed_hom = self.rotation.E_hom * self.translation.tx_hom
-            self.Xmat_sp_fixed_hom_inv = self.rotation.E_hom_inv * self.translation.tx_hom_inv
+            # now build the homogenous [R | xyz
+            #                           0 | 1 ]
+            self.Xmat_sp_hom_fixed = copy.deepcopy(self.rotation.rot_hom(self.rotation.E))
+            self.Xmat_sp_hom_fixed_inv = copy.deepcopy(self.rotation.rot_hom(self.rotation.E.transpose()))
+            self.Xmat_sp_hom_fixed[0,3] = self.translation.x
+            self.Xmat_sp_hom_fixed[1,3] = self.translation.y
+            self.Xmat_sp_hom_fixed[2,3] = self.translation.z
+            self.Xmat_sp_hom_fixed_inv[0,3] = -self.translation.x
+            self.Xmat_sp_hom_fixed_inv[1,3] = -self.translation.y
+            self.Xmat_sp_hom_fixed_inv[2,3] = -self.translation.z
+
 
 class Quaternion_Tools:
     def __init__(self):
@@ -157,3 +171,4 @@ class Quaternion_Tools:
 
     def rpy_to_quat(self, r, p, y):
         pass
+
