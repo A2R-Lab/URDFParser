@@ -207,7 +207,7 @@ class Robot:
 
     def get_num_links_effective(self):
         # subtracting base link from total # of links
-        return get_num_links() - 1
+        return self.get_num_links() - 1
 
     def get_link_by_id(self, lid):
         return self.next_none(filter(lambda flink: flink.lid == lid, self.links))

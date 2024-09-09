@@ -171,3 +171,4 @@ class Quaternion_Tools:
 
     def rpy_to_quat(self, r, p, y):
         pass
+
