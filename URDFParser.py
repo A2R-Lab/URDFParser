@@ -10,19 +10,20 @@ class URDFParser:
     def __init__(self):
         pass
     
-    def parse(self, filename, alpha_tie_breaker = False):
+    def parse(self, filename, floating_base = False, using_quaternion = True, alpha_tie_breaker = False):
+        Joint.floating_base = floating_base
         try:
             # parse the file
             urdf_file = open(filename, "r")
             self.soup = BeautifulSoup(urdf_file.read(),"xml").find("robot")
             # set up the robot object
-            self.robot = Robot(self.soup["name"])
+            self.robot = Robot(self.soup["name"], floating_base, using_quaternion)
             # collect links
             self.parse_links()
             # collect joints
             self.parse_joints()
             # remove all fixed joints, renumber links and joints, and build parent and subtree lists
-            self.renumber_linksJoints(alpha_tie_breaker)
+            self.renumber_linksJoints(using_quaternion, alpha_tie_breaker)
             # report joint ordering to user
             self.print_joint_order()
             # return the robot object
@@ -49,8 +50,8 @@ class URDFParser:
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
             else:
-                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"].split()))
-                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"].split()))
+                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"].split(" ")))
+                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"].split(" ")))
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
@@ -78,14 +79,14 @@ class URDFParser:
                                raw_joint.find("child")["link"])
             jid += 1
             # get origin position and rotation
-            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"].split()))
-            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"].split()))
+            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"].split(" ")))
+            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"].split(" ")))
             # set joint type and axis of motion for joints if applicable
             raw_axis = raw_joint.find("axis")
             if raw_axis is None:
                 curr_joint.set_type(raw_joint["type"])
             else:
-                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"].split()))
+                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"].split(" ")))
             raw_dynamics = raw_joint.find("dynamics")
             if raw_dynamics is None:
                 curr_joint.set_damping(0)
@@ -182,15 +183,34 @@ class URDFParser:
                 next_lid += 1
                 next_jid += 1
 
+    def floating_base_adjust(self, root_link_name, using_quaternion = True):
+        if not self.robot.floating_base:
+            return root_link_name
+        # add world link
+        world = Link("world",-2) # -2 is temporary and unique
+        world.set_origin_xyz([0, 0, 0])
+        world.set_origin_rpy([0, 0, 0])
+        world.set_inertia(0, 0, 0, 0, 0, 0, 0)
+        self.robot.add_link(copy.deepcopy(world))
+        # add floating joint
+        floating_joint = Joint("floating_base_joint", -2, "world", root_link_name, using_quaternion)
+        floating_joint.set_origin_xyz([0,0,0])
+        floating_joint.set_origin_rpy([0,0,0])
+        floating_joint.set_type("floating")
+        floating_joint.set_damping(0)
+        self.robot.add_joint(copy.deepcopy(floating_joint))
+        return "world" # world link is now the root
 
-    def renumber_linksJoints(self, alpha_tie_breaker = False):
+    def renumber_linksJoints(self, using_quaternion = True, alpha_tie_breaker = False):
         # remove all fixed joints where applicable (merge links)
         self.remove_fixed_joints()
         # find the root link
         link_names = set([link.name for link in self.robot.get_links_ordered_by_id()])
         links_that_are_children = set([joint.get_child() for joint in self.robot.get_joints_ordered_by_id()])
         root_link_name = list(link_names.difference(links_that_are_children))[0]
-        # start renumbering at -1 as the base link is fixed by default
+        # adjust for floating base if applicable
+        root_link_name = self.floating_base_adjust(root_link_name, using_quaternion)
+        # start renumbering at -1
         self.robot.get_link_by_name(root_link_name).set_id(-1)
         # generate the standard dfs ordering of joints/links
         self.dfs_order_update(root_link_name, alpha_tie_breaker)
@@ -206,5 +226,8 @@ class URDFParser:
         for curr_joint in self.robot.get_joints_ordered_by_id():
             print(curr_joint.get_name())
         print("----------------------------")
-        print("Total of n = " + str(self.robot.get_num_pos()) + " joints")
+        print("Total of n = " + str(self.robot.get_num_vel()) + " dof")
+        print("Total of n = " + str(self.robot.get_num_joints()) + " joints")
+        print("Total of n = " + str(self.robot.get_num_links()) + (" links (including world frame for floating base)" \
+                                                                   if self.robot.floating_base else " links"))
         print("----------------------------")

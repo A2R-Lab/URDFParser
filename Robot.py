@@ -1,18 +1,48 @@
 from .Link import Link
 from .Joint import Joint
+from .SpatialAlgebra import Quaternion_Tools
 
 class Robot:
     # initialization
-    def __init__(self, name):
+    def __init__(self, name, floating_base = False, using_quaternion = True):
         self.name = name
+        self.floating_base = floating_base
         self.links = []
         self.joints = []
+        self.using_quaternion = using_quaternion
 
     def next_none(self, iterable):
         try:
             return next(iterable)
         except:
             return None
+        
+    def get_joint_index_q(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                return [0,1,2,3,4,5,6] if self.using_quaternion else [0,1,2,3,4,5]
+            else:
+                return joint_id + (6 if self.using_quaternion else 5)
+        else:
+            return joint_id
+
+    def get_joint_index_v(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                return [0,1,2,3,4,5]
+            else:
+                return joint_id + 5
+        else:
+            return joint_id
+
+    def get_joint_index_f(self, joint_id):
+        if self.floating_base:
+            if joint_id == 0:
+                return [0, 1, 2, 3, 4, 5]
+            else:
+                return joint_id + 5
+        else:
+            return joint_id
 
     #################
     #    Setters    #
@@ -35,10 +65,27 @@ class Robot:
     #########################
 
     def get_num_pos(self):
-        return self.get_num_joints()
+        """
+        Returns the robot's total number of position degrees of freedom. 
+        This corresponds to the size of the position(q) array.
+
+        Output:
+        - (int) - total position degrees of freedom
+        """
+        return self.get_num_vel() + (1 if (self.floating_base and self.using_quaternion) else 0)
 
     def get_num_vel(self):
-        return self.get_num_joints()
+        """
+        Returns the robot's total number of velocity degrees of freedom.
+        This corresponds to the size of the velocity(qd) array.
+
+        Output:
+        - (int) - total velocity degrees of freedom
+        """
+        return sum([joint.get_num_dof() for joint in self.joints])
+    
+    def get_num_bodies(self):
+        return self.get_num_links_effective()
 
     def get_num_cntrl(self):
         return self.get_num_joints()
@@ -384,4 +431,37 @@ class Robot:
         return {joint.name:joint.get_joint_subspace() for joint in self.joints}
 
     def are_Ss_identical(self,jids):
+        """
+        Returns whether all joints have the same subspace matrix.
+        If the robot has a floating base, the method will return False.
+        This method is for optimizations during code generation.
+
+        Outputs:
+        - (bool) - True/False whether all joints have the same subspace matrix
+        """
+        if self.floating_base: return False
         return all(all(self.get_S_by_id(jid) == self.get_S_by_id(jids[0])) for jid in jids)
+    
+    def get_S_inds(self, n):
+        """
+        Returns the index of the 1 in each joint's subspace matrix up to joint n.
+        If the robot has a floating base, then the first six entries in the
+        S_inds list will be the indices of the 1's in each column of the 
+        floating base's subspace matrix.
+
+        Inputs:
+        -   (int) n - the total number of joints to get indices for
+
+        Outputs:
+        -   [(int)] - the index of the 1 in each of the n subspace matrices
+        """
+        if self.floating_base:
+            fb_S = self.get_S_by_id(0).T.tolist() # break fb S into each column
+            S_inds = []
+            for dof in fb_S:
+                S_inds.append(str(dof.index(1))) # take the indices of the 1's in each column
+            for jid in range(1,n):
+                S_inds.append(str(self.get_S_by_id(jid).tolist().index([1]))) # take the rest
+        else:
+            S_inds = [str(self.get_S_by_id(jid).tolist().index([1])) for jid in range(n)]
+        return S_inds
