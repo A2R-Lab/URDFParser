@@ -127,6 +127,9 @@ class Robot:
             else:
                 ancestors.append(curr_id)
         return ancestors
+    
+    def get_max_num_ancestors(self):
+        return max(len(self.get_ancestors_by_id(jid)) for jid in range(self.get_num_joints()))
 
     def get_total_ancestor_count(self):
         return sum([len(self.get_ancestors_by_id(jid)) for jid in range(self.get_num_joints())])
@@ -197,6 +200,7 @@ class Robot:
 
     def get_damping_by_id(self, jid):
         return self.get_joint_by_id(jid).get_damping()
+    
 
     ##############
     #    Link    #
