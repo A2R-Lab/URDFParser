@@ -201,6 +201,91 @@ class Robot:
     def get_damping_by_id(self, jid):
         return self.get_joint_by_id(jid).get_damping()
     
+    def get_children_by_id(self, jid):
+        """
+        Gets the joint children of a joint by its id.
+
+        Inputs:
+            - (int) jid - the joint id
+        
+        Returns:
+            - [(int)] - the ids of the children of the joint
+        """
+        chilren = []
+        for joint in range(self.get_num_joints()):
+            # Check if joint is a child of jid => if jid is an ancestor of joint
+            if jid in self.get_ancestors_by_id(joint):
+                chilren.append(joint)
+        return chilren
+    
+    
+    def get_jid_ancestor_ids(self, include_joint=False):
+        """
+        Used to generate the ids of the joints and their ancestors
+        as two lists.
+
+        The output is formatted such that the first list contains the 
+        ids of each joint and the second list contains the ids
+        of the ancestors of that joint.
+
+        Example: Joint 0 has ancestors [1, 2], Joint 1 has ancestors [2],
+        then the output would be ([0, 0, 1], [1, 2, 2]).
+
+        Inputs:
+            - (bool) include_joint - whether to include the joint itself in the
+                output as its own ancestor
+
+        Returns:
+            - ([(int)], [(int)]) - indices of joints & indices of ancestors
+        """
+        jids = []
+        ancestors = []
+        for joint in range(self.get_num_joints()):
+            ancestors_j = self.get_ancestors_by_id(joint)
+            if include_joint:
+                jids.append(joint)
+                ancestors.append(joint)
+            for i, ancestor in enumerate(ancestors_j): 
+                jids.append(joint)
+                ancestors.append(ancestor)
+        return jids, ancestors
+    
+    def get_jid_ancestor_st_ids(self, include_joint=False):
+        """
+        Used to generate the ids of the joints, their ancestors,
+        and their subtree as three lists.
+
+        The output is formatted such that the first list contains the 
+        ids of each joint, the second list contains the ids
+        of the ancestors of that joint, and the third list contains
+        the subtree of that joint.
+
+        Example: Joint 2 has ancestors [0, 1], and subtree [2, 3, 4],
+        then the output will be [2, 2, 2, 2, 2, 2], [0, 0, 0, 1, 1, 1], [2, 3, 4, 2, 3, 4].
+
+        Inputs:
+            - (bool) include_joint - whether to include the joint itself in the
+                output as its own ancestor
+
+        Returns:
+            - ([(int)], [(int)]) - indices of joints & indices of ancestors
+        """
+        jids = []
+        ancestors = []
+        st = []
+        for joint in range(self.get_num_joints()):
+            ancestors_j = self.get_ancestors_by_id(joint)
+            st_j = self.get_subtree_by_id(joint)
+            if include_joint:
+                jids += [joint]*len(st_j)
+                ancestors += [joint]*len(st_j)
+                st += st_j
+            for i, ancestor in enumerate(ancestors_j): 
+                jids += [joint]*len(st_j)
+                ancestors += [ancestor]*len(st_j)
+                st += st_j
+        return jids, ancestors, st
+
 
     ##############
     #    Link    #

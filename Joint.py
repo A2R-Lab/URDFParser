@@ -14,7 +14,7 @@ class Joint:
         self.origin = Origin()   # Fixed origin location
         self.jtype = None        # type of joint
         self.parent = parent     # parent link name
-        self.child = child       # child link name
+        self.child = child       # child link name TODO - currently unused
         self.theta = sp.symbols("theta") # Free 1D joint variable
         self.Xmat_sp = None      # Sympy X matrix placeholder
         self.Xmat_sp_free = None # Sympy X_free matrix placeholder
