@@ -126,6 +126,8 @@ class Joint:
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
             # and derivative
             self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom,self.theta)
+            # and second derivative
+            self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom,self.theta)
 
     def get_transformation_matrix_function(self):
         if self.jtype == "floating":
@@ -148,8 +150,14 @@ class Joint:
     def get_dtransformation_matrix_hom_function(self):
         return sp.utilities.lambdify(self.theta, self.dXmat_sp_hom, 'numpy')
 
+    def get_d2transformation_matrix_hom_function(self):
+        return sp.utilities.lambdify(self.theta, self.d2Xmat_sp_hom, 'numpy')
+
     def get_dtransformation_matrix_hom(self):
         return self.dXmat_sp_hom
+
+    def get_d2transformation_matrix_hom(self):
+        return self.d2Xmat_sp_hom
 
     def get_joint_subspace(self):
         return self.S
