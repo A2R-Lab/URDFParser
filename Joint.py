@@ -14,7 +14,7 @@ class Joint:
         self.origin = Origin()   # Fixed origin location
         self.jtype = None        # type of joint
         self.parent = parent     # parent link name
-        self.child = child       # child link name
+        self.child = child       # child link name TODO - currently unused
         self.theta = sp.symbols("theta") # Free 1D joint variable
         self.Xmat_sp = None      # Sympy X matrix placeholder
         self.Xmat_sp_free = None # Sympy X_free matrix placeholder
@@ -126,6 +126,8 @@ class Joint:
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
             # and derivative
             self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom,self.theta)
+            # and second derivative
+            self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom,self.theta)
 
     def get_transformation_matrix_function(self):
         if self.jtype == "floating":
@@ -148,8 +150,14 @@ class Joint:
     def get_dtransformation_matrix_hom_function(self):
         return sp.utilities.lambdify(self.theta, self.dXmat_sp_hom, 'numpy')
 
+    def get_d2transformation_matrix_hom_function(self):
+        return sp.utilities.lambdify(self.theta, self.d2Xmat_sp_hom, 'numpy')
+
     def get_dtransformation_matrix_hom(self):
         return self.dXmat_sp_hom
+
+    def get_d2transformation_matrix_hom(self):
+        return self.d2Xmat_sp_hom
 
     def get_joint_subspace(self):
         return self.S
