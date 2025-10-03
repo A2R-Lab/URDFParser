@@ -92,6 +92,27 @@ class URDFParser:
                 curr_joint.set_damping(0)
             else:
                 curr_joint.set_damping(float(raw_dynamics["damping"]))
+
+            # parse limits (upper/lower)
+            raw_limit = raw_joint.find("limit")
+            jtype = raw_joint["type"]
+
+            lower = upper = None
+
+            if jtype in ("revolute", "prismatic", "continuous"):
+                if raw_limit is not None:
+                    if raw_limit.has_attr("lower"): lower = float(raw_limit["lower"])
+                    if raw_limit.has_attr("upper"): upper = float(raw_limit["upper"])
+
+                if jtype == "continuous":
+                    lower = float("-inf")
+                    upper = float("inf")
+
+                if lower is None: lower = float("-inf")
+                if upper is None: upper = float("inf")
+
+                curr_joint.joint_limits = [lower, upper]
+
             # store
             self.robot.add_joint(copy.deepcopy(curr_joint))
 

@@ -36,6 +36,7 @@ class Joint:
         self.roll_fb = sp.symbols("roll_fb")
         self.pitch_fb = sp.symbols("pitch_fb")
         self.yaw_fb = sp.symbols("yaw_fb")
+        self.joint_limits = []
 
     def set_id(self, id_in):
         self.jid = id_in
@@ -185,3 +186,6 @@ class Joint:
     
     def get_num_dof(self):
         return self.dof
+    
+    def get_joint_limits(self):
+        return self.joint_limits
