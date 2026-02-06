@@ -1,5 +1,5 @@
 from .Link import Link
-from .Joint import Joint
+from .Joint import Joint, Fixed_Joint
 from .SpatialAlgebra import Quaternion_Tools
 
 class Robot:
@@ -9,6 +9,7 @@ class Robot:
         self.floating_base = floating_base
         self.links = []
         self.joints = []
+        self.fixed_joints = []
         self.using_quaternion = using_quaternion
 
     def next_none(self, iterable):
@@ -53,6 +54,9 @@ class Robot:
 
     def add_link(self, link):
         self.links.append(link)
+
+    def add_fixed_joint(self, fixed_joint):
+        self.fixed_joints.append(fixed_joint)
 
     def remove_joint(self, joint):
         self.joints.remove(joint)
@@ -689,3 +693,19 @@ class Robot:
         else:
             S_inds = [str(self.get_S_by_id(jid).tolist().index(1)) for jid in range(n)]
         return S_inds
+
+    ######################
+    #    Fixed Joints    #
+    ######################
+
+    def get_fixed_joint_by_name(self, name):
+        return self.next_none(filter(lambda fjoint: fjoint.name == name, self.fixed_joints))
+    
+    def get_fixed_joint_by_id(self, fjid):
+        return self.next_none(filter(lambda fjoint: fjoint.id == fjid, self.fixed_joints))
+
+    def get_fixed_joint_by_parent_name(self, parent_name):
+        return self.next_none(filter(lambda fjoint: fjoint.parent_name == parent_name, self.fixed_joints))
+
+    def get_fixed_joint_names(self):
+        return [fjoint.name for fjoint in self.fixed_joints]

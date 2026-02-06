@@ -189,3 +189,29 @@ class Joint:
     
     def get_joint_limits(self):
         return self.joint_limits
+
+# Need to retain fixed joints for possible kinematic use later
+class Fixed_Joint:
+    def __init__(self, id, name, parent_name, hom_xfrm):
+        self.id = id                    # original ID
+        self.name = name                # name
+        self.parent_name = parent_name  # parent joint name
+        self.Xmat_hom = hom_xfrm
+
+    def set_parent_name(self, name_in):
+        self.parent_name = name_in
+
+    def set_transformation_matrix_hom(self, hom_xfrm):
+        self.Xmat_hom = hom_xfrm
+
+    def get_id(self):
+        return self.id
+
+    def get_name(self):
+        return self.name
+
+    def get_parent_name(self):
+        return self.parent_name
+
+    def get_transformation_matrix_hom(self):
+        return self.Xmat_hom

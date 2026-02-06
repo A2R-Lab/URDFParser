@@ -4,7 +4,7 @@ import sympy as sp
 import copy
 from .Robot import Robot
 from .Link import Link
-from .Joint import Joint
+from .Joint import Joint, Fixed_Joint
 
 class URDFParser:
     def __init__(self):
@@ -117,7 +117,8 @@ class URDFParser:
             self.robot.add_joint(copy.deepcopy(curr_joint))
 
     def remove_fixed_joints(self):
-        for curr_joint in self.robot.get_joints_ordered_by_id():
+        # start at the leaves and work upwards
+        for curr_joint in reversed(self.robot.get_joints_ordered_by_id()):
             if curr_joint.jtype == "fixed":
                 # updated fixed transforms and parents of grandchild_joints
                 # to account for the additional fixed transform
@@ -135,6 +136,18 @@ class URDFParser:
                 transformed_Imat = np.matmul(np.matmul(np.transpose(curr_Xmat),child_I),curr_Xmat)
                 parent_link.set_spatial_inertia(parent_link.get_spatial_inertia() + transformed_Imat)
                 
+                # save the fixed joint for later
+                joint_hom = sp.matrix2numpy(curr_joint.get_transformation_matrix_hom()).astype(float)
+                parent_joint = self.robot.get_joints_by_child_name(parent_link.get_name())[0]
+                fj = Fixed_Joint(curr_joint.get_id(), curr_joint.get_name(), parent_joint.get_name(), joint_hom)
+                self.robot.add_fixed_joint(fj)
+                # update any fixed joints that had the current joint as the parent
+                for fixed_joint in self.robot.fixed_joints:
+                    if fixed_joint.parent_name == curr_joint.get_name():
+                        fixed_joint.set_parent_name(parent_joint.get_name())
+                        new_hom = fixed_joint.get_transformation_matrix_hom() @ joint_hom
+                        fixed_joint.set_transformation_matrix_hom(new_hom)
+
                 # delete the bypassed fixed joint and link
                 self.robot.remove_joint(curr_joint)
                 self.robot.remove_link(child_link)
@@ -223,8 +236,6 @@ class URDFParser:
         return "world" # world link is now the root
 
     def renumber_linksJoints(self, using_quaternion = True, alpha_tie_breaker = False):
-        # remove all fixed joints where applicable (merge links)
-        self.remove_fixed_joints()
         # find the root link
         link_names = set([link.name for link in self.robot.get_links_ordered_by_id()])
         links_that_are_children = set([joint.get_child() for joint in self.robot.get_joints_ordered_by_id()])
@@ -235,9 +246,12 @@ class URDFParser:
         self.robot.get_link_by_name(root_link_name).set_id(-1)
         # generate the standard dfs ordering of joints/links
         self.dfs_order_update(root_link_name, alpha_tie_breaker)
-        # also save a bfs parse ordering and levels of joints/links
+        # remove all fixed joints where applicable (merge links)
+        self.remove_fixed_joints()
+        # recompute the dfs ordering of joints/links to account for removed fixed joints
+        self.dfs_order_update(root_link_name, alpha_tie_breaker)
+        # also save a bfs parse ordering and levels of joints/links and build subtree lists
         self.bfs_order(root_link_name)
-        # build subtree lists
         self.build_subtree_lists()
 
     def print_joint_order(self):
