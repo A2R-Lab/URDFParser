@@ -144,13 +144,18 @@ class URDFParser:
                 # update any fixed joints that had the current joint as the parent
                 for fixed_joint in self.robot.fixed_joints:
                     if fixed_joint.parent_name == curr_joint.get_name():
-                        fixed_joint.set_parent_name(parent_joint.get_name())
+                        fixed_joint.set_parent(parent_joint.get_name())
                         new_hom = fixed_joint.get_transformation_matrix_hom() @ joint_hom
                         fixed_joint.set_transformation_matrix_hom(new_hom)
 
                 # delete the bypassed fixed joint and link
                 self.robot.remove_joint(curr_joint)
                 self.robot.remove_link(child_link)
+        
+        # renumber fixed joints (arbitarily) starting at the highest joint id to avoid conflicts with existing joint ids
+        total_joints = self.robot.get_num_joints()
+        for fj_id in range(len(self.robot.fixed_joints)):
+            self.robot.fixed_joints[fj_id].set_id(total_joints + fj_id)
 
     def build_subtree_lists(self):
         subtree_lid_lists = {}
@@ -260,9 +265,14 @@ class URDFParser:
         print("------------------------------------------")
         for curr_joint in self.robot.get_joints_ordered_by_id():
             print(curr_joint.get_name())
-        print("----------------------------")
+        print("------------------------------------------")
         print("Total of n = " + str(self.robot.get_num_vel()) + " dof")
         print("Total of n = " + str(self.robot.get_num_joints()) + " joints")
         print("Total of n = " + str(self.robot.get_num_links()) + (" links (including world frame for floating base)" \
                                                                    if self.robot.floating_base else " links"))
-        print("----------------------------")
+        print("------------------------------------------")
+        print("Fixed Joints Found (if any):")
+        print("------------------------------------------")
+        for fj in self.robot.fixed_joints:
+            print(fj.get_name() + " (id: " + str(fj.get_id()) + ", parent: " + fj.parent_name + ")")
+        print("------------------------------------------")

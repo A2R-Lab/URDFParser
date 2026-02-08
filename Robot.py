@@ -93,6 +93,9 @@ class Robot:
 
     def get_num_cntrl(self):
         return self.get_num_joints()
+    
+    def get_num_fixed_joints(self):
+        return len(self.fixed_joints)
 
     def get_name(self):
         return self.name
@@ -471,8 +474,10 @@ class Robot:
     def get_Xmats_hom_by_bfs_level(self, level):
         return [joint.get_transformation_matrix_hom() for joint in self.get_joints_by_bfs_level(level)]
 
-    def get_Xmats_hom_ordered_by_id(self, reverse = False):
-        return [joint.get_transformation_matrix_hom() for joint in self.get_joints_ordered_by_id(reverse)]
+    def get_Xmats_hom_ordered_by_id(self, reverse = False, include_fixed_joints = False):
+        base = [joint.get_transformation_matrix_hom() for joint in self.get_joints_ordered_by_id(reverse)]
+        fixed = [joint.get_transformation_matrix_hom() for joint in self.get_fixed_joints_ordered_by_id(reverse)]
+        return base + fixed if include_fixed_joints else base
 
     def get_Xmats_hom_ordered_by_name(self, reverse = False):
         return [joint.get_transformation_matrix_hom() for joint in self.get_joints_ordered_by_name(reverse)]
@@ -701,11 +706,14 @@ class Robot:
     def get_fixed_joint_by_name(self, name):
         return self.next_none(filter(lambda fjoint: fjoint.name == name, self.fixed_joints))
     
-    def get_fixed_joint_by_id(self, fjid):
-        return self.next_none(filter(lambda fjoint: fjoint.id == fjid, self.fixed_joints))
+    def get_fixed_joint_by_id(self, jid):
+        return self.next_none(filter(lambda fjoint: fjoint.jid == jid, self.fixed_joints))
 
     def get_fixed_joint_by_parent_name(self, parent_name):
         return self.next_none(filter(lambda fjoint: fjoint.parent_name == parent_name, self.fixed_joints))
 
     def get_fixed_joint_names(self):
         return [fjoint.name for fjoint in self.fixed_joints]
+    
+    def get_fixed_joints_ordered_by_id(self, reverse = False):
+        return sorted(self.fixed_joints, key=lambda item: item.jid, reverse = reverse)
