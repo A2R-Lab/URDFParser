@@ -32,10 +32,12 @@ class URDFParser:
             return None
 
     def to_float(self, string_arr):
+        if isinstance(string_arr, str):
+            string_arr = string_arr.split()
         try:
             return [float(value) for value in string_arr]
-        except:
-            return string_arr
+        except Exception as exc:
+            raise ValueError(f"Could not parse numeric values from {string_arr!r}") from exc
 
     def parse_links(self):
         lid = 0
@@ -50,8 +52,8 @@ class URDFParser:
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
             else:
-                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"].split(" ")))
-                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"].split(" ")))
+                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"]))
+                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"]))
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
@@ -79,14 +81,14 @@ class URDFParser:
                                raw_joint.find("child")["link"])
             jid += 1
             # get origin position and rotation
-            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"].split(" ")))
-            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"].split(" ")))
+            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"]))
+            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"]))
             # set joint type and axis of motion for joints if applicable
             raw_axis = raw_joint.find("axis")
             if raw_axis is None:
                 curr_joint.set_type(raw_joint["type"])
             else:
-                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"].split(" ")))
+                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"]))
             raw_dynamics = raw_joint.find("dynamics")
             if raw_dynamics is None:
                 curr_joint.set_damping(0)
@@ -138,13 +140,15 @@ class URDFParser:
                 
                 # save the fixed joint for later
                 joint_hom = sp.matrix2numpy(curr_joint.get_transformation_matrix_hom()).astype(float)
-                parent_joint = self.robot.get_joints_by_child_name(parent_link.get_name())[0]
-                fj = Fixed_Joint(curr_joint.get_id(), curr_joint.get_name(), parent_joint.get_name(), joint_hom)
+                parent_joints = self.robot.get_joints_by_child_name(parent_link.get_name())
+                parent_joint = parent_joints[0] if parent_joints else None
+                parent_joint_name = parent_joint.get_name() if parent_joint is not None else -1
+                fj = Fixed_Joint(curr_joint.get_id(), curr_joint.get_name(), parent_joint_name, joint_hom)
                 self.robot.add_fixed_joint(fj)
                 # update any fixed joints that had the current joint as the parent
                 for fixed_joint in self.robot.fixed_joints:
                     if fixed_joint.parent_name == curr_joint.get_name():
-                        fixed_joint.set_parent(parent_joint.get_name())
+                        fixed_joint.set_parent(parent_joint_name)
                         new_hom = fixed_joint.get_transformation_matrix_hom() @ joint_hom
                         fixed_joint.set_transformation_matrix_hom(new_hom)
 
@@ -274,5 +278,5 @@ class URDFParser:
         print("Fixed Joints Found (if any):")
         print("------------------------------------------")
         for fj in self.robot.fixed_joints:
-            print(fj.get_name() + " (id: " + str(fj.get_id()) + ", parent: " + fj.parent_name + ")")
+            print(fj.get_name() + " (id: " + str(fj.get_id()) + ", parent: " + str(fj.parent_name) + ")")
         print("------------------------------------------")
