@@ -81,8 +81,15 @@ class URDFParser:
                                raw_joint.find("child")["link"])
             jid += 1
             # get origin position and rotation
-            curr_joint.set_origin_xyz(self.to_float(raw_joint.find("origin")["xyz"]))
-            curr_joint.set_origin_rpy(self.to_float(raw_joint.find("origin")["rpy"]))
+            raw_origin = raw_joint.find("origin")
+            if raw_origin is None:
+                curr_joint.set_origin_xyz([0.0, 0.0, 0.0])
+                curr_joint.set_origin_rpy([0.0, 0.0, 0.0])
+            else:
+                joint_xyz = self.to_float(raw_origin["xyz"]) if raw_origin.has_attr("xyz") else [0.0, 0.0, 0.0]
+                joint_rpy = self.to_float(raw_origin["rpy"]) if raw_origin.has_attr("rpy") else [0.0, 0.0, 0.0]
+                curr_joint.set_origin_xyz(joint_xyz)
+                curr_joint.set_origin_rpy(joint_rpy)
             # set joint type and axis of motion for joints if applicable
             raw_axis = raw_joint.find("axis")
             if raw_axis is None:
