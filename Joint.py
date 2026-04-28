@@ -65,37 +65,58 @@ class Joint:
     def set_transformation_matrix(self, matrix_in):
         self.Xmat_sp = matrix_in
 
+    def set_transformation_matrix_hom(self, matrix_in):
+        self.Xmat_sp_hom = sp.nsimplify(matrix_in, tolerance=1e-6, rational=True).evalf()
+        self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom, self.theta)
+        self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom, self.theta)
+
+    def _axis_scale(self, axis, index):
+        value = float(axis[index])
+        if np.isclose(abs(value), 1.0):
+            return value
+        return None
+
     def set_type(self, jtype, axis = None):
         self.jtype = jtype
         self.origin.build_fixed_transform()
-        if self.jtype == 'revolute':
+        if self.jtype in ('revolute', 'continuous'):
             self.dof = 1
-            if axis[2] == 1:
-                self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rz(self.theta))
-                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rz(self.theta))
-                self.S = np.array([0,0,1,0,0,0])
-            elif axis[1] == 1:
-                self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.ry(self.theta))
-                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.ry(self.theta))
-                self.S = np.array([0,1,0,0,0,0])
-            elif axis[0] == 1:
-                self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rx(self.theta))
-                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rx(self.theta))
-                self.S = np.array([1,0,0,0,0,0])
+            axis_scale = self._axis_scale(axis, 2)
+            if axis_scale is not None:
+                self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rz(axis_scale * self.theta))
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rz(axis_scale * self.theta))
+                self.S = np.array([0,0,axis_scale,0,0,0])
+            else:
+                axis_scale = self._axis_scale(axis, 1)
+                if axis_scale is not None:
+                    self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.ry(axis_scale * self.theta))
+                    self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.ry(axis_scale * self.theta))
+                    self.S = np.array([0,axis_scale,0,0,0,0])
+                else:
+                    axis_scale = self._axis_scale(axis, 0)
+                    if axis_scale is not None:
+                        self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rx(axis_scale * self.theta))
+                        self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rx(axis_scale * self.theta))
+                        self.S = np.array([axis_scale,0,0,0,0,0])
         elif self.jtype == 'prismatic':
             self.dof = 1
-            if axis[2] == 1:
-                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,0,self.theta))
-                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,0,self.theta)
-                self.S = np.array([0,0,0,0,0,1])
-            elif axis[1] == 1:
-                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,self.theta,0))
-                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,self.theta,0)
-                self.S = np.array([0,0,0,0,1,0])
-            elif axis[0] == 1:
-                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(self.theta,0,0))
-                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(self.theta,0,0)
-                self.S = np.array([0,0,0,1,0,0])
+            axis_scale = self._axis_scale(axis, 2)
+            if axis_scale is not None:
+                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,0,axis_scale * self.theta))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,0,axis_scale * self.theta)
+                self.S = np.array([0,0,0,0,0,axis_scale])
+            else:
+                axis_scale = self._axis_scale(axis, 1)
+                if axis_scale is not None:
+                    self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,axis_scale * self.theta,0))
+                    self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,axis_scale * self.theta,0)
+                    self.S = np.array([0,0,0,0,axis_scale,0])
+                else:
+                    axis_scale = self._axis_scale(axis, 0)
+                    if axis_scale is not None:
+                        self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(axis_scale * self.theta,0,0))
+                        self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(axis_scale * self.theta,0,0)
+                        self.S = np.array([0,0,0,axis_scale,0,0])
         elif self.jtype == 'fixed':
             self.dof = 0
             self.Xmat_sp_free = sp.eye(6)

@@ -5,12 +5,19 @@ A simple parser libaray for URDF Files. That returns a ```robot``` object which 
 ## Usage:
 ```python
 parser = URDFParser()
-robot = parser.parse(urdf_filepath, floating_base = False, alpha_tie_breaker = False)
+robot = parser.parse(urdf_filepath, floating_base = False, joint_ordering = "pinocchio_order")
 ```
-Where the tie breaker is used to order joints with the same parent link.
+Where `joint_ordering` controls how DFS sibling ties are resolved.
 ```python 
-alpha_tie_breaker=False # URDF ordering used
-alpha_tie_breaker=True # Joint name ordering used
+joint_ordering="pinocchio_order"   # DFS with Pinocchio-style sibling sorting (default)
+joint_ordering="urdf_order"        # DFS preserving raw URDF sibling order
+joint_ordering="alphabetical_order" # DFS sorting sibling joints by joint name
+```
+
+The legacy `alpha_tie_breaker` argument is still accepted for backward compatibility:
+```python
+alpha_tie_breaker=False # equivalent to joint_ordering="urdf_order"
+alpha_tie_breaker=True  # equivalent to joint_ordering="alphabetical_order"
 ```
 
 ## Instalation Instructions:

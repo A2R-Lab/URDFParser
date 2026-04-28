@@ -11,6 +11,8 @@ class Robot:
         self.joints = []
         self.fixed_joints = []
         self.using_quaternion = using_quaternion
+        self.joint_type_by_id = {}
+        self.joint_type_by_name = {}
 
     def next_none(self, iterable):
         try:
@@ -51,6 +53,7 @@ class Robot:
 
     def add_joint(self, joint):
         self.joints.append(joint)
+        self.refresh_joint_metadata()
 
     def add_link(self, link):
         self.links.append(link)
@@ -60,9 +63,14 @@ class Robot:
 
     def remove_joint(self, joint):
         self.joints.remove(joint)
+        self.refresh_joint_metadata()
 
     def remove_link(self, link):
         self.links.remove(link)
+
+    def refresh_joint_metadata(self):
+        self.joint_type_by_id = {joint.jid: joint.jtype for joint in self.joints}
+        self.joint_type_by_name = {joint.name: joint.jtype for joint in self.joints}
 
     #########################
     #    Generic Getters    #
@@ -195,6 +203,18 @@ class Robot:
 
     def get_joints_dict_by_name(self):
         return {joint.name:joint for joint in self.joints}
+
+    def get_joint_type_by_id(self, jid):
+        return self.joint_type_by_id.get(jid)
+
+    def get_joint_type_by_name(self, name):
+        return self.joint_type_by_name.get(name)
+
+    def get_joint_types_by_id(self):
+        return dict(self.joint_type_by_id)
+
+    def get_joint_types_by_name(self):
+        return dict(self.joint_type_by_name)
 
     def get_joints_by_parent_name(self, parent_name):
         return list(filter(lambda fjoint: fjoint.parent == parent_name, self.joints))

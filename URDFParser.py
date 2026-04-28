@@ -10,7 +10,7 @@ class URDFParser:
     def __init__(self):
         pass
     
-    def parse(self, filename, floating_base = False, using_quaternion = True, alpha_tie_breaker = False):
+    def parse(self, filename, floating_base = False, using_quaternion = True, alpha_tie_breaker = None, joint_ordering = "pinocchio_order"):
         Joint.floating_base = floating_base
         try:
             # parse the file
@@ -23,13 +23,23 @@ class URDFParser:
             # collect joints
             self.parse_joints()
             # remove all fixed joints, renumber links and joints, and build parent and subtree lists
-            self.renumber_linksJoints(using_quaternion, alpha_tie_breaker)
+            resolved_joint_ordering = self.resolve_joint_ordering(alpha_tie_breaker, joint_ordering)
+            self.renumber_linksJoints(using_quaternion, resolved_joint_ordering)
             # report joint ordering to user
             self.print_joint_order()
             # return the robot object
             return copy.deepcopy(self.robot)
         except:
             return None
+
+    def resolve_joint_ordering(self, alpha_tie_breaker, joint_ordering):
+        if alpha_tie_breaker is not None:
+            return "alphabetical_order" if alpha_tie_breaker else "urdf_order"
+        if joint_ordering not in ("urdf_order", "alphabetical_order", "pinocchio_order"):
+            raise ValueError(
+                "joint_ordering must be one of 'urdf_order', 'alphabetical_order', or 'pinocchio_order'"
+            )
+        return joint_ordering
 
     def to_float(self, string_arr):
         if isinstance(string_arr, str):
@@ -45,21 +55,23 @@ class URDFParser:
             # construct link object
             curr_link = Link(raw_link["name"],lid)
             lid = lid + 1
-            # parse origin
-            raw_origin = raw_link.find("origin")
-            if raw_origin == None:
-                print("Link [" + curr_link.name + "] does not have an origin. Assuming this is the fixed world base frame. Else there is an error with your URDF file.")
-                curr_link.set_origin_xyz([0, 0, 0])
-                curr_link.set_origin_rpy([0, 0, 0])
-            else:
-                curr_link.set_origin_xyz(self.to_float(raw_origin["xyz"]))
-                curr_link.set_origin_rpy(self.to_float(raw_origin["rpy"]))
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
                 print("Link [" + curr_link.name + "] does not have inertial properties. Assuming this is the fixed world base frame. Else there is an error with your URDF file.")
+                curr_link.set_origin_xyz([0, 0, 0])
+                curr_link.set_origin_rpy([0, 0, 0])
                 curr_link.set_inertia(0, 0, 0, 0, 0, 0, 0)
             else:
+                raw_origin = raw_inertial.find("origin")
+                if raw_origin is None:
+                    curr_link.set_origin_xyz([0.0, 0.0, 0.0])
+                    curr_link.set_origin_rpy([0.0, 0.0, 0.0])
+                else:
+                    origin_xyz = self.to_float(raw_origin["xyz"]) if raw_origin.has_attr("xyz") else [0.0, 0.0, 0.0]
+                    origin_rpy = self.to_float(raw_origin["rpy"]) if raw_origin.has_attr("rpy") else [0.0, 0.0, 0.0]
+                    curr_link.set_origin_xyz(origin_xyz)
+                    curr_link.set_origin_rpy(origin_rpy)
                 # get mass and inertia values
                 raw_inertia = raw_inertial.find("inertia")
                 curr_link.set_inertia(float(raw_inertial.find("mass")["value"]), \
@@ -135,6 +147,9 @@ class URDFParser:
                 for gcjoint in self.robot.get_joints_by_parent_name(curr_joint.child):
                     gcjoint.set_parent(curr_joint.get_parent())
                     gcjoint.set_transformation_matrix(gcjoint.get_transformation_matrix() * curr_joint.get_transformation_matrix())
+                    gcjoint.set_transformation_matrix_hom(
+                        curr_joint.get_transformation_matrix_hom() * gcjoint.get_transformation_matrix_hom()
+                    )
                 # combine inertia tensors of child and parent at parent
                 # note:  if X is the transform from A to B the I_B = X^T I_A X
                 # note2: inertias in the same from add so I_parent_final = I_parent + X^T I_child X
@@ -156,7 +171,7 @@ class URDFParser:
                 for fixed_joint in self.robot.fixed_joints:
                     if fixed_joint.parent_name == curr_joint.get_name():
                         fixed_joint.set_parent(parent_joint_name)
-                        new_hom = fixed_joint.get_transformation_matrix_hom() @ joint_hom
+                        new_hom = joint_hom @ fixed_joint.get_transformation_matrix_hom()
                         fixed_joint.set_transformation_matrix_hom(new_hom)
 
                 # delete the bypassed fixed joint and link
@@ -185,12 +200,22 @@ class URDFParser:
             curr_subtree = subtree_lid_lists[link.get_id()]
             link.set_subtree(copy.deepcopy(curr_subtree))
 
-    def dfs_order_update(self, parent_name, alpha_tie_breaker = False, next_lid = 0, next_jid = 0):
+    def sort_child_joints(self, child_joints, joint_ordering):
+        if joint_ordering == "urdf_order":
+            return child_joints
+        if joint_ordering == "alphabetical_order":
+            return sorted(child_joints, key=lambda joint: joint.name)
+        if joint_ordering == "pinocchio_order":
+            return sorted(child_joints, key=lambda joint: (joint.child, joint.name))
+        raise ValueError(
+            "joint_ordering must be one of 'urdf_order', 'alphabetical_order', or 'pinocchio_order'"
+        )
+
+    def dfs_order_update(self, parent_name, joint_ordering = "pinocchio_order", next_lid = 0, next_jid = 0):
         while True:
             child_joints = self.robot.get_joints_by_parent_name(parent_name)
             parent_id = self.robot.get_link_by_name(parent_name).lid
-            if alpha_tie_breaker:
-                child_joints.sort(key=lambda joint: joint.name)
+            child_joints = self.sort_child_joints(child_joints, joint_ordering)
             for curr_joint in child_joints:
                 # save the new id
                 curr_joint.set_id(next_jid)
@@ -199,7 +224,7 @@ class URDFParser:
                 child.set_id(next_lid)
                 child.set_parent_id(parent_id)
                 # recurse
-                next_lid, next_jid = self.dfs_order_update(child.name, alpha_tie_breaker, next_lid + 1, next_jid + 1)
+                next_lid, next_jid = self.dfs_order_update(child.name, joint_ordering, next_lid + 1, next_jid + 1)
             # return to parent
             return next_lid, next_jid
 
@@ -251,7 +276,7 @@ class URDFParser:
         self.robot.add_joint(copy.deepcopy(floating_joint))
         return "world" # world link is now the root
 
-    def renumber_linksJoints(self, using_quaternion = True, alpha_tie_breaker = False):
+    def renumber_linksJoints(self, using_quaternion = True, joint_ordering = "pinocchio_order"):
         # find the root link
         link_names = set([link.name for link in self.robot.get_links_ordered_by_id()])
         links_that_are_children = set([joint.get_child() for joint in self.robot.get_joints_ordered_by_id()])
@@ -261,14 +286,15 @@ class URDFParser:
         # start renumbering at -1
         self.robot.get_link_by_name(root_link_name).set_id(-1)
         # generate the standard dfs ordering of joints/links
-        self.dfs_order_update(root_link_name, alpha_tie_breaker)
+        self.dfs_order_update(root_link_name, joint_ordering)
         # remove all fixed joints where applicable (merge links)
         self.remove_fixed_joints()
         # recompute the dfs ordering of joints/links to account for removed fixed joints
-        self.dfs_order_update(root_link_name, alpha_tie_breaker)
+        self.dfs_order_update(root_link_name, joint_ordering)
         # also save a bfs parse ordering and levels of joints/links and build subtree lists
         self.bfs_order(root_link_name)
         self.build_subtree_lists()
+        self.robot.refresh_joint_metadata()
 
     def print_joint_order(self):
         print("------------------------------------------")
