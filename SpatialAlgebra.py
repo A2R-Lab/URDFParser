@@ -115,60 +115,45 @@ class Quaternion_Tools:
         return (r,p,y)
 
     def quat_to_rot_sp(self, q0, q1, q2, q3):
-        # GRiD uses a wxyz quaternion, convert to xyzw form for the matrix calculation
-        # using https://automaticaddison.com/how-to-convert-a-quaternion-to-a-rotation-matrix/
-        temp = q0
-        q0 = q1
-        q1 = q2
-        q2 = q3
-        q3 = temp
+        # GRiD now uses Pinocchio-compatible xyzw quaternion ordering directly.
+        # using x, y, z, w quaternion ordering
+        x = q0
+        y = q1
+        z = q2
+        w = q3
 
-        total = sp.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
-        q0 = q0/total
-        q1 = q1/total
-        q2 = q2/total
-        q3 = q3/total
+        total = sp.sqrt(x*x + y*y + z*z + w*w)
+        x = x / total
+        y = y / total
+        z = z / total
+        w = w / total
 
-        q0s = q0*q0
-        q1s = q1*q1
-        q2s = q2*q2
-        q3s = q3*q3
-        q01 = q0*q1
-        q02 = q0*q2
-        q03 = q0*q3
-        q12 = q1*q2
-        q13 = q1*q3
-        q23 = q2*q3
-
-        E = 2 * sp.Matrix([[(q0s + q1s) - 0.5, q12 + q03,         q13 - q02],
-        [q12 - q03,         (q0s + q2s) - 0.5, q23 + q01],
-        [q13 + q02,         q23 - q01,         (q0s + q3s) - 0.5]])
+        E = sp.Matrix([
+            [1 - 2 * (y*y + z*z), 2 * (x*y - z*w),     2 * (x*z + y*w)],
+            [2 * (x*y + z*w),     1 - 2 * (x*x + z*z), 2 * (y*z - x*w)],
+            [2 * (x*z - y*w),     2 * (y*z + x*w),     1 - 2 * (x*x + y*y)],
+        ])
 
         return E
 
     def quat_to_rot_np(self, q0, q1, q2, q3):
-        total = np.sqrt(q0*q0 + q1*q1 + q2*q2 + q3*q3)
-        q0 = q0/total
-        q1 = q1/total
-        q2 = q2/total
-        q3 = q3/total
+        x = q0
+        y = q1
+        z = q2
+        w = q3
 
-        q0s = q0*q0
-        q1s = q1*q1;
-        q2s = q2*q2;
-        q3s = q3*q3;
-        q01 = q0*q1;
-        q02 = q0*q2;
-        q03 = q0*q3;
-        q12 = q1*q2;
-        q13 = q1*q3;
-        q23 = q2*q3;
+        total = np.sqrt(x*x + y*y + z*z + w*w)
+        x = x / total
+        y = y / total
+        z = z / total
+        w = w / total
 
-        E = 2 * np.matrix([[q0s + q1s - 0.5, q12 + q03,       q13 - q02],
-                           [q12 - q03,       q0s + q2s - 0.5, q23 + q01],
-                           [q13 + q02,       q23 - q01,       q0s + q3s - 0.5]])
+        E = np.matrix([
+            [1 - 2 * (y*y + z*z), 2 * (x*y - z*w),     2 * (x*z + y*w)],
+            [2 * (x*y + z*w),     1 - 2 * (x*x + z*z), 2 * (y*z - x*w)],
+            [2 * (x*z - y*w),     2 * (y*z + x*w),     1 - 2 * (x*x + y*y)],
+        ])
         return E
 
     def rpy_to_quat(self, r, p, y):
         pass
-

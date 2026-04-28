@@ -261,6 +261,23 @@ class URDFParser:
     def floating_base_adjust(self, root_link_name, using_quaternion = True):
         if not self.robot.floating_base:
             return root_link_name
+        if root_link_name == "world":
+            root_children = self.robot.get_joints_by_parent_name("world")
+            if len(root_children) != 1:
+                raise ValueError(
+                    "Floating-base conversion for an explicit URDF world root currently expects "
+                    f"exactly one child joint from 'world', found {len(root_children)}."
+                )
+            floating_joint = root_children[0]
+            if floating_joint.get_child() == "world":
+                raise ValueError(
+                    "Floating-base conversion encountered an invalid self-loop from 'world' to 'world'."
+                )
+            floating_joint.name = "floating_base_joint"
+            floating_joint.using_quaternion = using_quaternion
+            floating_joint.set_type("floating")
+            floating_joint.set_damping(0)
+            return "world"
         # add world link
         world = Link("world",-2) # -2 is temporary and unique
         world.set_origin_xyz([0, 0, 0])

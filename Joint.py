@@ -18,9 +18,8 @@ class Joint:
         self.theta = sp.symbols("theta") # Free 1D joint variable
         self.Xmat_sp = None      # Sympy X matrix placeholder
         self.Xmat_sp_free = None # Sympy X_free matrix placeholder
-        if not Joint.floating_base:
-            self.Xmat_sp_hom = None      # Sympy X homogenous 4x4 matrix placeholder
-            self.Xmat_sp_hom_free = None # Sympy X_free homogenous 4x4  matrix placeholder
+        self.Xmat_sp_hom = None      # Sympy X homogenous 4x4 matrix placeholder
+        self.Xmat_sp_hom_free = None # Sympy X_free homogenous 4x4  matrix placeholder
         self.Smat_sp = None      # Sympy S matrix placeholder (usually a vector)
         self.damping = 0         # damping placeholder
         self.dof = 0             # dof placeholder
@@ -126,21 +125,39 @@ class Joint:
             self.dof = 6
             if self.using_quaternion:
                 self.qt = Quaternion_Tools()
-                rot = self.origin.rotation.rot(self.qt.quat_to_rot_sp(self.q1_fb,self.q2_fb,self.q3_fb,self.q4_fb))
+                quat_rot = self.qt.quat_to_rot_sp(self.q1_fb,self.q2_fb,self.q3_fb,self.q4_fb)
+                rot = self.origin.rotation.rot(quat_rot)
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(quat_rot)
             else:
-                rot = self.origin.rotation.rot(self.origin.rotation.rx(self.roll_fb) * \
-                                               self.origin.rotation.ry(self.pitch_fb) * \
-                                               self.origin.rotation.rz(self.yaw_fb))
+                rpy_rot = self.origin.rotation.rx(self.roll_fb) * \
+                          self.origin.rotation.ry(self.pitch_fb) * \
+                          self.origin.rotation.rz(self.yaw_fb)
+                rot = self.origin.rotation.rot(rpy_rot)
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(rpy_rot)
             trans = self.origin.translation.xlt(self.origin.translation.skew(self.x_fb, self.y_fb, self.z_fb))
+            self.Xmat_sp_hom_free[:3,3] = sp.Matrix([self.x_fb, self.y_fb, self.z_fb])
             self.Xmat_sp_free = rot*trans
-            self.S = np.eye(6)
+            # User-facing floating-base vectors follow Pinocchio order
+            # [vx, vy, vz, wx, wy, wz], while GRiD's internal spatial vectors
+            # use [wx, wy, wz, vx, vy, vz].
+            self.S = np.array(
+                [
+                    [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                ],
+                dtype=np.float64,
+            )
         else:
             print('Only revolute and fixed joints currently supported (outside of floating base)!')
             exit()
         self.Xmat_sp = self.Xmat_sp_free * self.origin.Xmat_sp_fixed
         # remove numerical noise (e.g., URDF's often specify angles as 3.14 or 3.14159 but that isn't exactly PI)
         self.Xmat_sp = sp.nsimplify(self.Xmat_sp, tolerance=1e-6, rational=True).evalf()
-        if not Joint.floating_base:
+        if self.jtype != 'floating':
             # homogenous transform needs to "sum" translation and rotation
             self.Xmat_sp_hom = sp.eye(4)
             self.Xmat_sp_hom[:3,:3] = (self.Xmat_sp_hom_free[:3,:3] * self.origin.Xmat_sp_hom_fixed[:3,:3]).transpose()
@@ -150,6 +167,9 @@ class Joint:
             self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom,self.theta)
             # and second derivative
             self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom,self.theta)
+        else:
+            self.Xmat_sp_hom = self.Xmat_sp_hom_free * self.origin.Xmat_sp_hom_fixed
+            self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
 
     def get_transformation_matrix_function(self):
         if self.jtype == "floating":
@@ -164,6 +184,19 @@ class Joint:
         return self.Xmat_sp
 
     def get_transformation_matrix_hom_function(self):
+        if self.jtype == "floating":
+            if self.using_quaternion:
+                return sp.utilities.lambdify(
+                    [[self.x_fb, self.y_fb, self.z_fb, self.q1_fb, self.q2_fb, self.q3_fb, self.q4_fb]],
+                    self.Xmat_sp_hom,
+                    'numpy',
+                )
+            else:
+                return sp.utilities.lambdify(
+                    [[self.x_fb, self.y_fb, self.z_fb, self.roll_fb, self.pitch_fb, self.yaw_fb]],
+                    self.Xmat_sp_hom,
+                    'numpy',
+                )
         return sp.utilities.lambdify(self.theta, self.Xmat_sp_hom, 'numpy')
 
     def get_transformation_matrix_hom(self):
