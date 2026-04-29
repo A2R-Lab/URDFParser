@@ -36,6 +36,10 @@ class Joint:
         self.pitch_fb = sp.symbols("pitch_fb")
         self.yaw_fb = sp.symbols("yaw_fb")
         self.joint_limits = []
+        self.position_symbols = []
+        self.local_q_dim = 0
+        self.dXmat_sp_hom_blocks = []
+        self.d2Xmat_sp_hom_blocks = []
 
     def set_id(self, id_in):
         self.jid = id_in
@@ -66,8 +70,45 @@ class Joint:
 
     def set_transformation_matrix_hom(self, matrix_in):
         self.Xmat_sp_hom = sp.nsimplify(matrix_in, tolerance=1e-6, rational=True).evalf()
-        self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom, self.theta)
-        self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom, self.theta)
+        self.position_symbols = [self.theta]
+        self.local_q_dim = 1
+        self._build_homogeneous_transform_derivatives()
+
+    def _build_homogeneous_transform_derivatives(self):
+        if self.Xmat_sp_hom is None:
+            self.dXmat_sp_hom = None
+            self.d2Xmat_sp_hom = None
+            self.dXmat_sp_hom_blocks = []
+            self.d2Xmat_sp_hom_blocks = []
+            return
+
+        if not self.position_symbols:
+            self.dXmat_sp_hom = sp.zeros(4, 4)
+            self.d2Xmat_sp_hom = sp.zeros(4, 4)
+            self.dXmat_sp_hom_blocks = []
+            self.d2Xmat_sp_hom_blocks = []
+            self.local_q_dim = 0
+            return
+
+        self.dXmat_sp_hom_blocks = [
+            sp.diff(self.Xmat_sp_hom, symbol) for symbol in self.position_symbols
+        ]
+        self.d2Xmat_sp_hom_blocks = [
+            [
+                sp.diff(self.dXmat_sp_hom_blocks[row_ind], self.position_symbols[col_ind])
+                for col_ind in range(len(self.position_symbols))
+            ]
+            for row_ind in range(len(self.position_symbols))
+        ]
+        self.dXmat_sp_hom = self.dXmat_sp_hom_blocks[0]
+        self.d2Xmat_sp_hom = self.d2Xmat_sp_hom_blocks[0][0]
+
+    def _local_q_lambdify_args(self):
+        if self.jtype == "floating":
+            if self.using_quaternion:
+                return [[self.x_fb, self.y_fb, self.z_fb, self.q1_fb, self.q2_fb, self.q3_fb, self.q4_fb]]
+            return [[self.x_fb, self.y_fb, self.z_fb, self.roll_fb, self.pitch_fb, self.yaw_fb]]
+        return self.theta
 
     def _axis_scale(self, axis, index):
         value = float(axis[index])
@@ -80,6 +121,8 @@ class Joint:
         self.origin.build_fixed_transform()
         if self.jtype in ('revolute', 'continuous'):
             self.dof = 1
+            self.position_symbols = [self.theta]
+            self.local_q_dim = 1
             axis_scale = self._axis_scale(axis, 2)
             if axis_scale is not None:
                 self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rz(axis_scale * self.theta))
@@ -99,6 +142,8 @@ class Joint:
                         self.S = np.array([axis_scale,0,0,0,0,0])
         elif self.jtype == 'prismatic':
             self.dof = 1
+            self.position_symbols = [self.theta]
+            self.local_q_dim = 1
             axis_scale = self._axis_scale(axis, 2)
             if axis_scale is not None:
                 self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,0,axis_scale * self.theta))
@@ -118,11 +163,33 @@ class Joint:
                         self.S = np.array([0,0,0,axis_scale,0,0])
         elif self.jtype == 'fixed':
             self.dof = 0
+            self.position_symbols = []
+            self.local_q_dim = 0
             self.Xmat_sp_free = sp.eye(6)
             self.Xmat_sp_hom_free = sp.eye(4)
             self.S = np.array([0,0,0,0,0,0])
         elif self.jtype == 'floating':
             self.dof = 6
+            if self.using_quaternion:
+                self.position_symbols = [
+                    self.x_fb,
+                    self.y_fb,
+                    self.z_fb,
+                    self.q1_fb,
+                    self.q2_fb,
+                    self.q3_fb,
+                    self.q4_fb,
+                ]
+            else:
+                self.position_symbols = [
+                    self.x_fb,
+                    self.y_fb,
+                    self.z_fb,
+                    self.roll_fb,
+                    self.pitch_fb,
+                    self.yaw_fb,
+                ]
+            self.local_q_dim = len(self.position_symbols)
             if self.using_quaternion:
                 self.qt = Quaternion_Tools()
                 quat_rot = self.qt.quat_to_rot_sp(self.q1_fb,self.q2_fb,self.q3_fb,self.q4_fb)
@@ -164,19 +231,15 @@ class Joint:
             self.Xmat_sp_hom[:3,3] = self.Xmat_sp_hom_free[:3,3] + self.origin.Xmat_sp_hom_fixed[:3,3]
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
             # and derivative
-            self.dXmat_sp_hom = sp.diff(self.Xmat_sp_hom,self.theta)
-            # and second derivative
-            self.d2Xmat_sp_hom = sp.diff(self.dXmat_sp_hom,self.theta)
+            self._build_homogeneous_transform_derivatives()
         else:
             self.Xmat_sp_hom = self.Xmat_sp_hom_free * self.origin.Xmat_sp_hom_fixed
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
+            self._build_homogeneous_transform_derivatives()
 
     def get_transformation_matrix_function(self):
         if self.jtype == "floating":
-            if self.using_quaternion:
-                return sp.utilities.lambdify([[self.x_fb, self.y_fb, self.z_fb, self.q1_fb, self.q2_fb, self.q3_fb, self.q4_fb]], self.Xmat_sp, 'numpy')
-            else:
-                return sp.utilities.lambdify([[self.x_fb, self.y_fb, self.z_fb, self.roll_fb, self.pitch_fb, self.yaw_fb]], self.Xmat_sp, 'numpy')
+            return sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp, 'numpy')
         else:
             return sp.utilities.lambdify(self.theta, self.Xmat_sp, 'numpy')
 
@@ -184,35 +247,45 @@ class Joint:
         return self.Xmat_sp
 
     def get_transformation_matrix_hom_function(self):
-        if self.jtype == "floating":
-            if self.using_quaternion:
-                return sp.utilities.lambdify(
-                    [[self.x_fb, self.y_fb, self.z_fb, self.q1_fb, self.q2_fb, self.q3_fb, self.q4_fb]],
-                    self.Xmat_sp_hom,
-                    'numpy',
-                )
-            else:
-                return sp.utilities.lambdify(
-                    [[self.x_fb, self.y_fb, self.z_fb, self.roll_fb, self.pitch_fb, self.yaw_fb]],
-                    self.Xmat_sp_hom,
-                    'numpy',
-                )
-        return sp.utilities.lambdify(self.theta, self.Xmat_sp_hom, 'numpy')
+        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp_hom, 'numpy')
 
     def get_transformation_matrix_hom(self):
         return self.Xmat_sp_hom
 
     def get_dtransformation_matrix_hom_function(self):
-        return sp.utilities.lambdify(self.theta, self.dXmat_sp_hom, 'numpy')
+        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.dXmat_sp_hom, 'numpy')
 
     def get_d2transformation_matrix_hom_function(self):
-        return sp.utilities.lambdify(self.theta, self.d2Xmat_sp_hom, 'numpy')
+        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.d2Xmat_sp_hom, 'numpy')
 
     def get_dtransformation_matrix_hom(self):
         return self.dXmat_sp_hom
 
     def get_d2transformation_matrix_hom(self):
         return self.d2Xmat_sp_hom
+
+    def get_local_q_dim(self):
+        return self.local_q_dim
+
+    def get_dtransformation_matrix_hom_local(self, local_index):
+        return self.dXmat_sp_hom_blocks[local_index]
+
+    def get_d2transformation_matrix_hom_local(self, local_index_i, local_index_j):
+        return self.d2Xmat_sp_hom_blocks[local_index_i][local_index_j]
+
+    def get_dtransformation_matrix_hom_local_function(self, local_index):
+        return sp.utilities.lambdify(
+            self._local_q_lambdify_args(),
+            self.get_dtransformation_matrix_hom_local(local_index),
+            'numpy',
+        )
+
+    def get_d2transformation_matrix_hom_local_function(self, local_index_i, local_index_j):
+        return sp.utilities.lambdify(
+            self._local_q_lambdify_args(),
+            self.get_d2transformation_matrix_hom_local(local_index_i, local_index_j),
+            'numpy',
+        )
 
     def get_joint_subspace(self):
         return self.S

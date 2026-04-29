@@ -228,6 +228,9 @@ class Robot:
     def get_damping_by_id(self, jid):
         return self.get_joint_by_id(jid).get_damping()
 
+    def get_joint_position_dim_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_local_q_dim()
+
     def get_children_by_id(self, jid):
         """
         Gets the joint children of a joint by its id.
@@ -565,6 +568,12 @@ class Robot:
     def get_dXmat_hom_Func_by_id(self, jid):
         return self.get_joint_by_id(jid).get_dtransformation_matrix_hom_function()
 
+    def get_dXmat_hom_local_by_id(self, jid, local_index):
+        return self.get_joint_by_id(jid).get_dtransformation_matrix_hom_local(local_index)
+
+    def get_dXmat_hom_local_Func_by_id(self, jid, local_index):
+        return self.get_joint_by_id(jid).get_dtransformation_matrix_hom_local_function(local_index)
+
     def get_dXmat_hom_Func_by_name(self, name):
         return self.get_joint_by_name(name).get_dtransformation_matrix_hom_function()
 
@@ -614,6 +623,12 @@ class Robot:
 
     def get_d2Xmat_hom_Func_by_id(self, jid):
         return self.get_joint_by_id(jid).get_d2transformation_matrix_hom_function()
+
+    def get_d2Xmat_hom_local_by_id(self, jid, local_index_i, local_index_j):
+        return self.get_joint_by_id(jid).get_d2transformation_matrix_hom_local(local_index_i, local_index_j)
+
+    def get_d2Xmat_hom_local_Func_by_id(self, jid, local_index_i, local_index_j):
+        return self.get_joint_by_id(jid).get_d2transformation_matrix_hom_local_function(local_index_i, local_index_j)
 
     def get_d2Xmat_hom_Func_by_name(self, name):
         return self.get_joint_by_name(name).get_d2transformation_matrix_hom_function()
