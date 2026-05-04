@@ -680,6 +680,23 @@ class Robot:
     def get_S_by_id(self, jid):
         return self.get_joint_by_id(jid).get_joint_subspace()
 
+    def get_S_index_by_id(self, jid):
+        S = self.get_S_by_id(jid).tolist()
+        for index, value in enumerate(S):
+            if abs(value) == 1:
+                return index
+        raise ValueError("Joint subspace does not contain a unit axis.")
+
+    def get_S_sign_by_id(self, jid):
+        S = self.get_S_by_id(jid).tolist()
+        for value in S:
+            if abs(value) == 1:
+                return int(value)
+        raise ValueError("Joint subspace does not contain a unit axis.")
+
+    def get_signed_S_index_by_id(self, jid):
+        return self.get_S_sign_by_id(jid) * (self.get_S_index_by_id(jid) + 1)
+
     def get_S_by_name(self, name):
         return self.get_joint_by_name(name).get_joint_subspace()
 
@@ -727,11 +744,11 @@ class Robot:
             fb_S = self.get_S_by_id(0).T.tolist() # break fb S into each column
             S_inds = []
             for dof in fb_S:
-                S_inds.append(str(dof.index(1))) # take the indices of the 1's in each column
+                S_inds.append(str(next((1 if value > 0 else -1) * (index + 1) for index, value in enumerate(dof) if abs(value) == 1))) # signed one-based unit-axis index
             for jid in range(1,n):
-                S_inds.append(str(self.get_S_by_id(jid).tolist().index(1))) # take the rest
+                S_inds.append(str(self.get_signed_S_index_by_id(jid))) # take the rest
         else:
-            S_inds = [str(self.get_S_by_id(jid).tolist().index(1)) for jid in range(n)]
+            S_inds = [str(self.get_signed_S_index_by_id(jid)) for jid in range(n)]
         return S_inds
 
     ######################
