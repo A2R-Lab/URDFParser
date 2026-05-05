@@ -10,14 +10,27 @@ class URDFParser:
     def __init__(self):
         pass
     
-    def parse(self, filename, floating_base = False, using_quaternion = True, alpha_tie_breaker = None, joint_ordering = "pinocchio_order"):
+    def parse(
+        self,
+        filename,
+        floating_base = False,
+        using_quaternion = True,
+        alpha_tie_breaker = None,
+        joint_ordering = "pinocchio_order",
+        floating_base_convention = "pinocchio",
+    ):
         Joint.floating_base = floating_base
         try:
             # parse the file
             urdf_file = open(filename, "r")
             self.soup = BeautifulSoup(urdf_file.read(),"xml").find("robot")
             # set up the robot object
-            self.robot = Robot(self.soup["name"], floating_base, using_quaternion)
+            self.robot = Robot(
+                self.soup["name"],
+                floating_base,
+                using_quaternion,
+                floating_base_convention=floating_base_convention,
+            )
             # collect links
             self.parse_links()
             # collect joints
