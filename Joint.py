@@ -273,6 +273,12 @@ class Joint:
     def get_d2transformation_matrix_hom_local(self, local_index_i, local_index_j):
         return self.d2Xmat_sp_hom_blocks[local_index_i][local_index_j]
 
+    def get_d2transformation_matrix_local(self, local_index_i, local_index_j):
+        return sp.diff(
+            sp.diff(self.Xmat_sp, self.position_symbols[local_index_i]),
+            self.position_symbols[local_index_j],
+        )
+
     def get_dtransformation_matrix_hom_local_function(self, local_index):
         return sp.utilities.lambdify(
             self._local_q_lambdify_args(),
@@ -284,6 +290,13 @@ class Joint:
         return sp.utilities.lambdify(
             self._local_q_lambdify_args(),
             self.get_d2transformation_matrix_hom_local(local_index_i, local_index_j),
+            'numpy',
+        )
+
+    def get_d2transformation_matrix_local_function(self, local_index_i, local_index_j):
+        return sp.utilities.lambdify(
+            self._local_q_lambdify_args(),
+            self.get_d2transformation_matrix_local(local_index_i, local_index_j),
             'numpy',
         )
 
