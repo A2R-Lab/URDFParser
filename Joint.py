@@ -225,10 +225,18 @@ class Joint:
         # remove numerical noise (e.g., URDF's often specify angles as 3.14 or 3.14159 but that isn't exactly PI)
         self.Xmat_sp = sp.nsimplify(self.Xmat_sp, tolerance=1e-6, rational=True).evalf()
         if self.jtype != 'floating':
-            # homogenous transform needs to "sum" translation and rotation
+            # homogenous transform needs to "sum" translation and rotation. The
+            # joint's variable translation t_free is in the JOINT frame; before
+            # adding it to the origin's offset (in the PARENT frame) it must be
+            # rotated through the origin's rotation. Skipping this is invisible
+            # on robots where origin rpy = 0 (every iiwa/go2/g1 revolute) but
+            # mis-places joints whose origin specifies a non-identity rotation
+            # (e.g. fr3_finger_joint2's origin rpy = π around Z mirrors the
+            # prismatic Y translation into -Y in the parent frame).
             self.Xmat_sp_hom = sp.eye(4)
             self.Xmat_sp_hom[:3,:3] = (self.Xmat_sp_hom_free[:3,:3] * self.origin.Xmat_sp_hom_fixed[:3,:3]).transpose()
-            self.Xmat_sp_hom[:3,3] = self.Xmat_sp_hom_free[:3,3] + self.origin.Xmat_sp_hom_fixed[:3,3]
+            self.Xmat_sp_hom[:3,3] = (self.origin.Xmat_sp_hom_fixed[:3,:3] * self.Xmat_sp_hom_free[:3,3]
+                                      + self.origin.Xmat_sp_hom_fixed[:3,3])
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
             # and derivative
             self._build_homogeneous_transform_derivatives()
