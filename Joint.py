@@ -40,6 +40,18 @@ class Joint:
         self.local_q_dim = 0
         self.dXmat_sp_hom_blocks = []
         self.d2Xmat_sp_hom_blocks = []
+        # URDF <mimic> tag handling. A mimic joint replicates another joint's
+        # generalized coordinate: q_self = multiplier * q[mimic_target] + offset
+        # (and likewise for v, a). Mimic joints do NOT contribute their own
+        # column to (q, v) -- their dof is reported as 0 so num_vel/num_pos
+        # collapse naturally -- but they DO still contribute to body
+        # transforms and Jacobian columns (folded into the mimicked column,
+        # scaled by `multiplier`).
+        self.is_mimic = False
+        self.mimic_joint_name = None
+        self.mimic_target_id = None
+        self.mimic_multiplier = 1.0
+        self.mimic_offset = 0.0
 
     def set_id(self, id_in):
         self.jid = id_in
@@ -325,7 +337,39 @@ class Joint:
         return self.child
     
     def get_num_dof(self):
+        # Mimic joints expose their motion through the mimicked joint and do
+        # not own a generalized coordinate of their own, so they contribute
+        # zero to nv/nq.
+        if self.is_mimic:
+            return 0
         return self.dof
+
+    def set_mimic(self, joint_name, multiplier=1.0, offset=0.0):
+        """Mark this joint as a URDF mimic of `joint_name`.
+
+        The relation is stored by NAME at parse time (target joint may not
+        be parsed yet). `URDFParser` resolves `mimic_target_id` to the
+        target joint's final jid after renumbering.
+        """
+        self.is_mimic = True
+        self.mimic_joint_name = joint_name
+        self.mimic_multiplier = float(multiplier)
+        self.mimic_offset = float(offset)
+
+    def is_mimic_joint(self):
+        return self.is_mimic
+
+    def get_mimic_joint_name(self):
+        return self.mimic_joint_name
+
+    def get_mimic_multiplier(self):
+        return float(self.mimic_multiplier)
+
+    def get_mimic_offset(self):
+        return float(self.mimic_offset)
+
+    def get_mimic_target_id(self):
+        return self.mimic_target_id
     
     def get_joint_limits(self):
         return self.joint_limits

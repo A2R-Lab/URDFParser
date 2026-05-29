@@ -147,6 +147,25 @@ class URDFParser:
 
                 curr_joint.joint_limits = [lower, upper]
 
+            # parse <mimic> tag (record by name; resolve to jid post-renumber).
+            raw_mimic = raw_joint.find("mimic")
+            if raw_mimic is not None:
+                if not raw_mimic.has_attr("joint"):
+                    raise ValueError(
+                        f"Joint '{curr_joint.get_name()}' has a <mimic> tag without "
+                        "a `joint` attribute."
+                    )
+                mimic_target_name = raw_mimic["joint"]
+                mimic_multiplier = (
+                    float(raw_mimic["multiplier"])
+                    if raw_mimic.has_attr("multiplier") else 1.0
+                )
+                mimic_offset = (
+                    float(raw_mimic["offset"])
+                    if raw_mimic.has_attr("offset") else 0.0
+                )
+                curr_joint.set_mimic(mimic_target_name, mimic_multiplier, mimic_offset)
+
             # store
             self.robot.add_joint(copy.deepcopy(curr_joint))
 
@@ -324,7 +343,43 @@ class URDFParser:
         # also save a bfs parse ordering and levels of joints/links and build subtree lists
         self.bfs_order(root_link_name)
         self.build_subtree_lists()
+        # resolve <mimic> targets now that final jids are stable
+        self.resolve_mimic_targets()
         self.robot.refresh_joint_metadata()
+
+    def resolve_mimic_targets(self):
+        """Resolve each mimic joint's `mimic_joint_name` to its current jid.
+
+        Must run after the final renumbering pass so `mimic_target_id` is
+        stable. Fails loudly (`ValueError`) if a mimic joint references a
+        joint that isn't part of the parsed model — silently dropping such
+        a relation produces wrong dynamics derivatives downstream (the bug
+        this support closes).
+        """
+        for joint in self.robot.get_joints_ordered_by_id():
+            if not getattr(joint, "is_mimic", False):
+                continue
+            target_name = joint.get_mimic_joint_name()
+            target = self.robot.get_joint_by_name(target_name)
+            if target is None:
+                # Allow mimic of a fixed joint: that's effectively a constant
+                # coordinate, which means this mimic joint also degenerates
+                # to a constant offset relative to its parent. Resolve by
+                # leaving mimic_target_id as -1 and dof=0 (already the case).
+                if self.robot.get_fixed_joint_by_name(target_name) is not None:
+                    joint.mimic_target_id = -1
+                    continue
+                raise ValueError(
+                    f"Joint '{joint.get_name()}' mimics unknown joint "
+                    f"'{target_name}'. Available joints: "
+                    f"{[j.get_name() for j in self.robot.get_joints_ordered_by_id()]}"
+                )
+            if getattr(target, "is_mimic", False):
+                raise ValueError(
+                    f"Joint '{joint.get_name()}' mimics '{target_name}', which is "
+                    "itself a mimic joint. Chained mimics are not supported."
+                )
+            joint.mimic_target_id = target.get_id()
 
     def print_joint_order(self):
         print("------------------------------------------")

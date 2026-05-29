@@ -25,32 +25,38 @@ class Robot:
         except:
             return None
         
+    def _dense_q_offset(self, joint_id):
+        # The dense map is populated by `refresh_joint_metadata`. If we're
+        # asked before any joints have been registered (or for an unknown
+        # jid), fall back to the joint_id itself to preserve legacy behavior
+        # on models without mimic joints.
+        return getattr(self, "_dense_q_offset_by_id", {}).get(joint_id, joint_id)
+
+    def _dense_v_offset(self, joint_id):
+        return getattr(self, "_dense_v_offset_by_id", {}).get(joint_id, joint_id)
+
     def get_joint_index_q(self, joint_id):
         if self.floating_base:
             if joint_id == 0:
                 return [0,1,2,3,4,5,6] if self.using_quaternion else [0,1,2,3,4,5]
-            else:
-                return joint_id + (6 if self.using_quaternion else 5)
-        else:
-            return joint_id
+            return self._dense_q_offset(joint_id)
+        return self._dense_q_offset(joint_id)
 
     def get_joint_index_v(self, joint_id):
         if self.floating_base:
             if joint_id == 0:
                 return [0,1,2,3,4,5]
-            else:
-                return joint_id + 5
-        else:
-            return joint_id
+            return self._dense_v_offset(joint_id)
+        return self._dense_v_offset(joint_id)
 
     def get_joint_index_f(self, joint_id):
+        # Same convention as v indexing for non-floating joints; the
+        # floating-base root maps to the 6-wide free-flyer block.
         if self.floating_base:
             if joint_id == 0:
                 return [0, 1, 2, 3, 4, 5]
-            else:
-                return joint_id + 5
-        else:
-            return joint_id
+            return self._dense_v_offset(joint_id)
+        return self._dense_v_offset(joint_id)
 
     def uses_legacy_floating_base_convention(self):
         return self.floating_base and self.floating_base_convention == "legacy"
@@ -146,6 +152,79 @@ class Robot:
     def refresh_joint_metadata(self):
         self.joint_type_by_id = {joint.jid: joint.jtype for joint in self.joints}
         self.joint_type_by_name = {joint.name: joint.jtype for joint in self.joints}
+        self._refresh_mimic_index_maps()
+
+    def _refresh_mimic_index_maps(self):
+        """Build dense (q, v) index maps that skip mimic joints.
+
+        Mimic joints don't own a generalized coordinate. To preserve
+        compatibility with downstream code that does `q[get_joint_index_q(j)]`
+        (and similar for v), we map each jid to the dense slot that ACTUALLY
+        carries its value: a mimic joint maps to the mimicked joint's slot
+        (its transform sees `multiplier * q[target] + offset`), and
+        non-mimic joints map to a fresh dense slot in joint-id order.
+        """
+        self._dense_q_offset_by_id = {}
+        self._dense_v_offset_by_id = {}
+        sorted_joints = self.get_joints_ordered_by_id()
+        # First pass: assign dense (q, v) offsets to non-mimic joints in jid order.
+        q_cursor = 0
+        v_cursor = 0
+        if self.floating_base and sorted_joints:
+            # The floating root is always non-mimic, sits at jid=0, and reserves
+            # the standard 7- or 6-wide block at the start of q / v.
+            fb_joint = self.get_joint_by_id(0)
+            self._dense_q_offset_by_id[0] = 0
+            self._dense_v_offset_by_id[0] = 0
+            q_cursor = 7 if self.using_quaternion else 6
+            v_cursor = 6
+            start_index = 1
+        else:
+            start_index = 0
+        for joint in sorted_joints[start_index:]:
+            if getattr(joint, "is_mimic", False):
+                continue
+            self._dense_q_offset_by_id[joint.jid] = q_cursor
+            self._dense_v_offset_by_id[joint.jid] = v_cursor
+            q_cursor += joint.local_q_dim if joint.local_q_dim else 1
+            v_cursor += joint.dof
+        # Second pass: mimic joints inherit the dense (q, v) offset of their
+        # target.  At this stage `mimic_target_id` may not yet be resolved
+        # (called from add_joint, before resolve_mimic_targets); fall back to
+        # the joint's own jid which keeps `q[get_joint_index_q(j)]` defined for
+        # debugging output before the parse completes.
+        for joint in sorted_joints:
+            if not getattr(joint, "is_mimic", False):
+                continue
+            tgt = joint.mimic_target_id if joint.mimic_target_id is not None else -1
+            if tgt in self._dense_q_offset_by_id:
+                self._dense_q_offset_by_id[joint.jid] = self._dense_q_offset_by_id[tgt]
+                self._dense_v_offset_by_id[joint.jid] = self._dense_v_offset_by_id[tgt]
+            else:
+                # Resolution pending or target unparented (mimic of fixed
+                # joint); point at slot 0 so transform-eval q_arg returns a
+                # finite scalar (mimic_offset is applied on top in q_for_joint).
+                self._dense_q_offset_by_id[joint.jid] = 0
+                self._dense_v_offset_by_id[joint.jid] = 0
+
+    def q_for_joint(self, jid, q):
+        """Return the local-q block (scalar or array) to feed joint `jid`'s
+        transform function, accounting for `<mimic>` joints.
+
+        For a regular joint this is just `q[get_joint_index_q(jid)]`. For a
+        mimic joint it's `multiplier * q[get_joint_index_q(target)] + offset`,
+        i.e. the value the URDF mimic relation prescribes.
+        """
+        joint = self.get_joint_by_id(jid)
+        inds = self.get_joint_index_q(jid)
+        if not isinstance(inds, (list, tuple, np.ndarray)):
+            inds = [inds]
+        block = np.asarray(q, dtype=np.float64)[list(inds)]
+        if getattr(joint, "is_mimic", False):
+            block = joint.get_mimic_multiplier() * block + joint.get_mimic_offset()
+        if block.size == 1:
+            return float(block[0])
+        return block
 
     #########################
     #    Generic Getters    #
