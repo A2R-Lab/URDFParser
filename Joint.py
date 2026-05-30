@@ -1,7 +1,28 @@
 # import numpy as np
+import math
 import numpy as np
 import sympy as sp
 from .SpatialAlgebra import Origin, Translation, Rotation, Quaternion_Tools
+
+
+def _snap_to_pi_grid(value, tolerance=1e-5):
+    """Snap a URDF rpy value to N*π/2 (|N| ≤ 4) when within `tolerance`.
+
+    URDFs commonly truncate (e.g. "1.5708" for π/2 leaves a ~3.7e-6 residual);
+    the residual cascades through float32 kinematic chains and can flip an
+    atan2 sign in rpy extraction. Bounded N keeps the snap targeted — only
+    angles already near a quarter-turn grid point collapse exactly.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return value
+    pi_half = math.pi / 2
+    for n in range(-4, 5):
+        if abs(v - n * pi_half) < tolerance:
+            return sp.Integer(0) if n == 0 else n * sp.pi / 2
+    return value
+
 
 class Joint:
     floating_base = False
@@ -72,7 +93,12 @@ class Joint:
         self.origin.set_translation(x,y,z)
 
     def set_origin_rpy(self, r, p = None, y = None):
-        self.origin.set_rotation(r,p,y)
+        if p is None and y is None:
+            r, p, y = r[0], r[1], r[2]
+        r = _snap_to_pi_grid(r)
+        p = _snap_to_pi_grid(p)
+        y = _snap_to_pi_grid(y)
+        self.origin.set_rotation(r, p, y)
 
     def set_damping(self, damping):
         self.damping = damping
