@@ -35,7 +35,7 @@ class Joint:
         self.origin = Origin()   # Fixed origin location
         self.jtype = None        # type of joint
         self.parent = parent     # parent link name
-        self.child = child       # child link name TODO - currently unused
+        self.child = child       # child link name; see docs/open-tasks/notes.md (Joint.py:38)
         self.theta = sp.symbols("theta") # Free 1D joint variable
         self.Xmat_sp = None      # Sympy X matrix placeholder
         self.Xmat_sp_free = None # Sympy X_free matrix placeholder
@@ -257,6 +257,8 @@ class Joint:
                 dtype=np.float64,
             )
         else:
+            # Unsupported joint type (e.g. planar). Guard intentionally kept.
+            # see docs/open-tasks/notes.md (Joint.py:260)
             print('Only revolute and fixed joints currently supported (outside of floating base)!')
             exit()
         self.Xmat_sp = self.Xmat_sp_free * self.origin.Xmat_sp_fixed

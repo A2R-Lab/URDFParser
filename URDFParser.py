@@ -71,6 +71,7 @@ class URDFParser:
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
+                # see docs/open-tasks/notes.md (URDFParser.py:74) re: degenerate inertial detection
                 print("Link [" + curr_link.name + "] does not have inertial properties. Assuming this is the fixed world base frame. Else there is an error with your URDF file.")
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
