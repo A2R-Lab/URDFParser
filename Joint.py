@@ -3,6 +3,7 @@ import math
 import numpy as np
 import sympy as sp
 from .SpatialAlgebra import Origin, Translation, Rotation, Quaternion_Tools
+from .errors import UnsupportedJointTypeError
 
 
 def _snap_to_pi_grid(value, tolerance=1e-5):
@@ -56,6 +57,16 @@ class Joint:
         self.roll_fb = sp.symbols("roll_fb")
         self.pitch_fb = sp.symbols("pitch_fb")
         self.yaw_fb = sp.symbols("yaw_fb")
+        # multi-DOF non-root joint coordinates (planar: 2 translations + 1
+        # rotation; spherical: a unit quaternion). These mirror the
+        # floating-base symbols but for a mid-chain joint.
+        self.px_pl = sp.symbols("px_pl")     # planar in-plane translation 1
+        self.py_pl = sp.symbols("py_pl")     # planar in-plane translation 2
+        self.theta_pl = sp.symbols("theta_pl")  # planar rotation about normal axis
+        self.q1_sph = sp.symbols("q1_sph")   # spherical unit quaternion (x,y,z,w)
+        self.q2_sph = sp.symbols("q2_sph")
+        self.q3_sph = sp.symbols("q3_sph")
+        self.q4_sph = sp.symbols("q4_sph")
         self.joint_limits = []
         self.position_symbols = []
         self.local_q_dim = 0
@@ -146,6 +157,10 @@ class Joint:
             if self.using_quaternion:
                 return [[self.x_fb, self.y_fb, self.z_fb, self.q1_fb, self.q2_fb, self.q3_fb, self.q4_fb]]
             return [[self.x_fb, self.y_fb, self.z_fb, self.roll_fb, self.pitch_fb, self.yaw_fb]]
+        if self.jtype == "planar":
+            return [[self.px_pl, self.py_pl, self.theta_pl]]
+        if self.jtype == "spherical":
+            return [[self.q1_sph, self.q2_sph, self.q3_sph, self.q4_sph]]
         return self.theta
 
     def _axis_scale(self, axis, index):
@@ -256,15 +271,94 @@ class Joint:
                 ],
                 dtype=np.float64,
             )
+        elif self.jtype == 'planar':
+            # Planar joint: 3 DOF (two in-plane translations + one rotation
+            # about the plane-normal axis). NQ == NV == 3 (a vector group, no
+            # manifold), so the config-space update is a plain vector add --
+            # this is the multi-DOF case that reuses the floating-base
+            # multi-symbol bookkeeping WITHOUT the quaternion NV!=NQ wrinkle.
+            #
+            # GROUNDWORK ONLY: the native 6x3 motion subspace below is correct
+            # for the numpy reference (which consumes the full symbolic S), but
+            # the CUDA codegen emit of a multi-COLUMN non-root S is DEFERRED
+            # (see Robot.get_S_index_by_id, which assumes a single signed unit
+            # axis). See docs/open-tasks/joint_types_plan.md (planar, route b).
+            self.dof = 3
+            self.position_symbols = [self.px_pl, self.py_pl, self.theta_pl]
+            self.local_q_dim = 3
+            # Plane normal axis selects the rotation column and the two
+            # translation columns. Default URDF planar normal is +Z (XY-plane).
+            rot = self.origin.rotation.rz(self.theta_pl)
+            trans = self.origin.translation.xlt(
+                self.origin.translation.skew(self.px_pl, self.py_pl, 0)
+            )
+            self.Xmat_sp_free = self.origin.rotation.rot(rot) * trans
+            self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(rot)
+            self.Xmat_sp_hom_free[:3, 3] = sp.Matrix([self.px_pl, self.py_pl, 0])
+            # 6x3 spatial motion subspace in internal [wx,wy,wz,vx,vy,vz] order.
+            # COLUMNS MUST MATCH position_symbols / v-DOF order [px, py, theta]:
+            #   col0 = translation along +X, col1 = translation along +Y,
+            #   col2 = rotation about +Z.
+            self.S = np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                dtype=np.float64,
+            )
+        elif self.jtype == 'spherical':
+            # Spherical / ball joint: 3 DOF (rotation only) parameterized by a
+            # unit quaternion. NV=3, NQ=4 -> NV!=NQ, exactly the floating-base
+            # rotation sub-pattern. The config-space update is an SO(3)
+            # quaternion exp (NOT a vector add).
+            #
+            # GROUNDWORK ONLY: the native 6x3 angular S below is correct for
+            # the symbolic transform, but BOTH (a) the CUDA codegen emit of a
+            # multi-column non-root S AND (b) the per-joint SO(3) retract in
+            # RBDReference.integrate/dIntegrate (today hardcoded to a single
+            # free-flyer prefix) are DEFERRED. See
+            # docs/open-tasks/joint_types_plan.md (spherical).
+            self.dof = 3
+            self.position_symbols = [self.q1_sph, self.q2_sph, self.q3_sph, self.q4_sph]
+            self.local_q_dim = 4
+            self.qt = Quaternion_Tools()
+            quat_rot = self.qt.quat_to_rot_sp(
+                self.q1_sph, self.q2_sph, self.q3_sph, self.q4_sph
+            )
+            self.Xmat_sp_free = self.origin.rotation.rot(quat_rot)
+            self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(quat_rot)
+            # 6x3 angular-only motion subspace in internal [w;v] order.
+            self.S = np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                dtype=np.float64,
+            )
         else:
-            # Unsupported joint type (e.g. planar). Guard intentionally kept.
+            # Unsupported joint type. Raise a typed, catchable exception
+            # instead of the old print()+exit() which killed the host process
+            # with an uncatchable SystemExit and no traceback. Callers can now
+            # catch URDFParseError / UnsupportedJointTypeError and surface a
+            # structured error (e.g. the equivalence harness skips the robot).
             # see docs/open-tasks/notes.md (Joint.py:260)
-            print('Only revolute and fixed joints currently supported (outside of floating base)!')
-            exit()
+            raise UnsupportedJointTypeError(jtype, joint_name=self.name)
         self.Xmat_sp = self.Xmat_sp_free * self.origin.Xmat_sp_fixed
         # remove numerical noise (e.g., URDF's often specify angles as 3.14 or 3.14159 but that isn't exactly PI)
         self.Xmat_sp = sp.nsimplify(self.Xmat_sp, tolerance=1e-6, rational=True).evalf()
-        if self.jtype != 'floating':
+        # Multi-DOF non-root joints (planar, spherical) carry their variable
+        # translation/rotation directly in Xmat_sp_hom_free (like floating),
+        # so they use the floating-style direct hom composition rather than the
+        # single-DOF "rotate t_free through origin rpy" path.
+        if self.jtype not in ('floating', 'planar', 'spherical'):
             # homogenous transform needs to "sum" translation and rotation. The
             # joint's variable translation t_free is in the JOINT frame; before
             # adding it to the origin's offset (in the PARENT frame) it must be
@@ -286,7 +380,7 @@ class Joint:
             self._build_homogeneous_transform_derivatives()
 
     def get_transformation_matrix_function(self):
-        if self.jtype == "floating":
+        if self.jtype in ("floating", "planar", "spherical"):
             return sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp, 'numpy')
         else:
             return sp.utilities.lambdify(self.theta, self.Xmat_sp, 'numpy')

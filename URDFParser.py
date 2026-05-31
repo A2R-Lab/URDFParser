@@ -5,6 +5,7 @@ import copy
 from .Robot import Robot
 from .Link import Link
 from .Joint import Joint, Fixed_Joint
+from .errors import URDFParseError
 
 class URDFParser:
     def __init__(self):
@@ -42,7 +43,16 @@ class URDFParser:
             self.print_joint_order()
             # return the robot object
             return copy.deepcopy(self.robot)
-        except:
+        except URDFParseError:
+            # Typed, structured parser errors (e.g. an unsupported joint type)
+            # are propagated so callers can catch and report them instead of
+            # silently receiving None. This replaces the old print()+exit()
+            # uncatchable SystemExit failure mode.
+            raise
+        except Exception:
+            # Backwards-compatible catch-all: any other malformed-URDF failure
+            # still degrades to None (historical behavior). Valid URDFs are
+            # unaffected.
             return None
 
     def resolve_joint_ordering(self, alpha_tie_breaker, joint_ordering):

@@ -36,18 +36,29 @@ class Robot:
         return getattr(self, "_dense_v_offset_by_id", {}).get(joint_id, joint_id)
 
     def get_joint_index_q(self, joint_id):
-        if self.floating_base:
-            if joint_id == 0:
-                return [0,1,2,3,4,5,6] if self.using_quaternion else [0,1,2,3,4,5]
-            return self._dense_q_offset(joint_id)
-        return self._dense_q_offset(joint_id)
+        if self.floating_base and joint_id == 0:
+            return [0,1,2,3,4,5,6] if self.using_quaternion else [0,1,2,3,4,5]
+        offset = self._dense_q_offset(joint_id)
+        # Multi-DOF non-root joints (planar NQ=3, spherical NQ=4) own a
+        # CONTIGUOUS BLOCK of q slots, not a single scalar. Return the range so
+        # `q[get_joint_index_q(jid)]` feeds the whole local-q vector to the
+        # joint's transform function (mirrors the floating-base root block).
+        joint = self.get_joint_by_id(joint_id)
+        local_q_dim = getattr(joint, "local_q_dim", 0) if joint is not None else 0
+        if local_q_dim and local_q_dim > 1:
+            return list(range(offset, offset + local_q_dim))
+        return offset
 
     def get_joint_index_v(self, joint_id):
-        if self.floating_base:
-            if joint_id == 0:
-                return [0,1,2,3,4,5]
-            return self._dense_v_offset(joint_id)
-        return self._dense_v_offset(joint_id)
+        if self.floating_base and joint_id == 0:
+            return [0,1,2,3,4,5]
+        offset = self._dense_v_offset(joint_id)
+        # Multi-DOF non-root joints own a contiguous block of v slots (= dof).
+        joint = self.get_joint_by_id(joint_id)
+        dof = joint.get_num_dof() if joint is not None else 0
+        if dof and dof > 1:
+            return list(range(offset, offset + dof))
+        return offset
 
     def get_joint_index_f(self, joint_id):
         # Same convention as v indexing for non-floating joints; the
@@ -238,7 +249,17 @@ class Robot:
         Output:
         - (int) - total position degrees of freedom
         """
-        return self.get_num_vel() + (1 if (self.floating_base and self.using_quaternion) else 0)
+        # NQ exceeds NV by one per quaternion-parameterized joint: the
+        # floating-base root (when using_quaternion) and every spherical joint
+        # (NQ=4, NV=3). All other joints have NQ==NV locally.
+        quaternion_offset = 1 if (self.floating_base and self.using_quaternion) else 0
+        quaternion_offset += sum(
+            1
+            for joint in self.joints
+            if getattr(joint, "jtype", None) == "spherical"
+            and not getattr(joint, "is_mimic", False)
+        )
+        return self.get_num_vel() + quaternion_offset
 
     def get_num_vel(self):
         """
@@ -837,7 +858,29 @@ class Robot:
     def _get_flat_S_by_id(self, jid):
         return self.get_S_by_id(jid).reshape(-1).tolist()
 
+    def _assert_single_axis_S(self, jid):
+        """Guard the single-signed-index S assumption these helpers encode.
+
+        The CUDA codegen represents each joint's motion subspace as ONE signed
+        index. A multi-DOF joint (planar / spherical, with a 6xN, N>1 S) breaks
+        that assumption; silently returning the first unit entry would emit
+        WRONG code. Fail loudly instead so the deferred multi-column-S codegen
+        path is reached explicitly. Single-column S (revolute/prismatic/
+        continuous/fixed) is unaffected.
+        """
+        joint = self.get_joint_by_id(jid)
+        dof = joint.get_num_dof() if joint is not None else 1
+        if dof and dof > 1:
+            jtype = getattr(joint, "jtype", "?")
+            raise ValueError(
+                f"Joint {jid} (type '{jtype}', dof={dof}) has a multi-column motion "
+                "subspace; the single-signed-index S helpers do not support it. "
+                "Multi-column-S CUDA emit is deferred (see "
+                "docs/open-tasks/joint_types_plan.md, E4)."
+            )
+
     def get_S_index_by_id(self, jid):
+        self._assert_single_axis_S(jid)
         S = self._get_flat_S_by_id(jid)
         for index, value in enumerate(S):
             if abs(value) == 1:
@@ -845,6 +888,7 @@ class Robot:
         raise ValueError("Joint subspace does not contain a unit axis.")
 
     def get_S_sign_by_id(self, jid):
+        self._assert_single_axis_S(jid)
         S = self._get_flat_S_by_id(jid)
         for value in S:
             if abs(value) == 1:

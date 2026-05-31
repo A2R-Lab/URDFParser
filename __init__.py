@@ -1,4 +1,5 @@
 from .URDFParser import URDFParser
+from .errors import URDFParseError, UnsupportedJointTypeError
 from .Robot import Robot
 from .Link import Link
 from .Joint import Joint, Fixed_Joint
