@@ -862,16 +862,24 @@ class Robot:
         """Guard the single-signed-index S assumption these helpers encode.
 
         The CUDA codegen represents each joint's motion subspace as ONE signed
-        index. A multi-DOF joint (planar / spherical, with a 6xN, N>1 S) breaks
-        that assumption; silently returning the first unit entry would emit
-        WRONG code. Fail loudly instead so the deferred multi-column-S codegen
-        path is reached explicitly. Single-column S (revolute/prismatic/
-        continuous/fixed) is unaffected.
+        index. A multi-DOF PLANAR / SPHERICAL joint (6xN, N>1 S) breaks that
+        assumption; silently returning the first unit entry would emit WRONG
+        code. Fail loudly instead so the deferred multi-column-S codegen path is
+        reached explicitly. Single-column S (revolute/prismatic/continuous/
+        fixed) is unaffected.
+
+        The floating-base free-flyer root is EXEMPT: it is also a 6-DOF
+        multi-column S, but it is an established, fully-handled path — existing
+        floating-base codegen (e.g. the `has_linear_axis` query in
+        _inverse_dynamics_gradient) calls these helpers on the root and relies
+        on the first-unit-index of its identity subspace. Raising there would
+        break every floating-base robot's codegen. Only the genuinely-unsupported
+        planar/spherical types (the E4 deferral target) trip the guard.
         """
         joint = self.get_joint_by_id(jid)
         dof = joint.get_num_dof() if joint is not None else 1
-        if dof and dof > 1:
-            jtype = getattr(joint, "jtype", "?")
+        jtype = getattr(joint, "jtype", "?") if joint is not None else "?"
+        if dof and dof > 1 and jtype != "floating":
             raise ValueError(
                 f"Joint {jid} (type '{jtype}', dof={dof}) has a multi-column motion "
                 "subspace; the single-signed-index S helpers do not support it. "
