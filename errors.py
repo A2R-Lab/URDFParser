@@ -26,7 +26,13 @@ class UnsupportedJointTypeError(URDFParseError):
     def __init__(self, jtype, joint_name=None):
         self.jtype = jtype
         self.joint_name = joint_name
-        supported = "revolute, continuous, prismatic, fixed, floating, planar, spherical"
+        # Fully supported end-to-end (parse + codegen + RBDReference). planar/
+        # spherical PARSE into a native representation (groundwork, see
+        # docs/open-tasks/joint_types_plan.md) but are NOT yet emitted by the
+        # CUDA codegen or modelled by RBDReference, so they are not advertised
+        # as supported here. GRiDCodeGenerator raises a clear error if a robot
+        # carrying them reaches codegen.
+        supported = "revolute, continuous, prismatic, fixed, floating"
         where = f" (joint '{joint_name}')" if joint_name is not None else ""
         super().__init__(
             f"Unsupported joint type '{jtype}'{where}. "
