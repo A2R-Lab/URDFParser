@@ -1,6 +1,6 @@
 # URDFParser
 
-A simple parser libaray for URDF Files. That returns a ```robot``` object which can be used to access links, joints, transformation matrices, etc.
+A simple parser library for URDF Files. That returns a ```robot``` object which can be used to access links, joints, transformation matrices, etc.
 
 ## Usage:
 ```python
@@ -37,7 +37,7 @@ Internally the parser and downstream dynamics code normalize floating-base state
 into the Pinocchio-style convention so generated code and reference algorithms
 stay consistent under the hood.
 
-## Instalation Instructions:
+## Installation Instructions:
 There are 4 required packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
 ```shell
 pip3 install -r requirements.txt
