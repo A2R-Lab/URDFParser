@@ -380,25 +380,43 @@ class Joint:
             self._build_homogeneous_transform_derivatives()
 
     def get_transformation_matrix_function(self):
-        if self.jtype in ("floating", "planar", "spherical"):
-            return sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp, 'numpy')
-        else:
-            return sp.utilities.lambdify(self.theta, self.Xmat_sp, 'numpy')
+        # Memoize the lambdified transform: it is a pure function of the joint's
+        # constant symbolic Xmat (the mimic multiplier/offset is applied to the
+        # numeric q BEFORE the call, so the function itself never varies). crba/
+        # forward_dynamics rebuild this per-body, and fd_grad_at finite-differences
+        # the whole chain ~2*nv times, so without caching a big mimic robot (h1_2)
+        # triggers ~1e4-1e5 lambdify builds and the reference hangs for many minutes.
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        if 'Xmat' not in cache:
+            if self.jtype in ("floating", "planar", "spherical"):
+                cache['Xmat'] = sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp, 'numpy')
+            else:
+                cache['Xmat'] = sp.utilities.lambdify(self.theta, self.Xmat_sp, 'numpy')
+        return cache['Xmat']
 
     def get_transformation_matrix(self):
         return self.Xmat_sp
 
     def get_transformation_matrix_hom_function(self):
-        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp_hom, 'numpy')
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        if 'Xmat_hom' not in cache:
+            cache['Xmat_hom'] = sp.utilities.lambdify(self._local_q_lambdify_args(), self.Xmat_sp_hom, 'numpy')
+        return cache['Xmat_hom']
 
     def get_transformation_matrix_hom(self):
         return self.Xmat_sp_hom
 
     def get_dtransformation_matrix_hom_function(self):
-        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.dXmat_sp_hom, 'numpy')
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        if 'dXmat_hom' not in cache:
+            cache['dXmat_hom'] = sp.utilities.lambdify(self._local_q_lambdify_args(), self.dXmat_sp_hom, 'numpy')
+        return cache['dXmat_hom']
 
     def get_d2transformation_matrix_hom_function(self):
-        return sp.utilities.lambdify(self._local_q_lambdify_args(), self.d2Xmat_sp_hom, 'numpy')
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        if 'd2Xmat_hom' not in cache:
+            cache['d2Xmat_hom'] = sp.utilities.lambdify(self._local_q_lambdify_args(), self.d2Xmat_sp_hom, 'numpy')
+        return cache['d2Xmat_hom']
 
     def get_dtransformation_matrix_hom(self):
         return self.dXmat_sp_hom
