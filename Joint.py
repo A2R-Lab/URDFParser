@@ -440,25 +440,41 @@ class Joint:
         )
 
     def get_dtransformation_matrix_hom_local_function(self, local_index):
-        return sp.utilities.lambdify(
-            self._local_q_lambdify_args(),
-            self.get_dtransformation_matrix_hom_local(local_index),
-            'numpy',
-        )
+        # Memoize (index-keyed): same pure-function cache as the scalar getters.
+        # These also recompute their symbolic derivative each call, so caching the
+        # lambda caches that too — matters for the floating/multi-DoF local-derivative
+        # paths (ee_pose_hessian / fdsva_so references) under finite-differencing.
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        key = ('dXmat_hom_local', local_index)
+        if key not in cache:
+            cache[key] = sp.utilities.lambdify(
+                self._local_q_lambdify_args(),
+                self.get_dtransformation_matrix_hom_local(local_index),
+                'numpy',
+            )
+        return cache[key]
 
     def get_d2transformation_matrix_hom_local_function(self, local_index_i, local_index_j):
-        return sp.utilities.lambdify(
-            self._local_q_lambdify_args(),
-            self.get_d2transformation_matrix_hom_local(local_index_i, local_index_j),
-            'numpy',
-        )
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        key = ('d2Xmat_hom_local', local_index_i, local_index_j)
+        if key not in cache:
+            cache[key] = sp.utilities.lambdify(
+                self._local_q_lambdify_args(),
+                self.get_d2transformation_matrix_hom_local(local_index_i, local_index_j),
+                'numpy',
+            )
+        return cache[key]
 
     def get_d2transformation_matrix_local_function(self, local_index_i, local_index_j):
-        return sp.utilities.lambdify(
-            self._local_q_lambdify_args(),
-            self.get_d2transformation_matrix_local(local_index_i, local_index_j),
-            'numpy',
-        )
+        cache = self.__dict__.setdefault('_lambdify_cache', {})
+        key = ('d2Xmat_local', local_index_i, local_index_j)
+        if key not in cache:
+            cache[key] = sp.utilities.lambdify(
+                self._local_q_lambdify_args(),
+                self.get_d2transformation_matrix_local(local_index_i, local_index_j),
+                'numpy',
+            )
+        return cache[key]
 
     def get_joint_subspace(self):
         return self.S
