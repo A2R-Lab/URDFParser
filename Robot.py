@@ -868,20 +868,18 @@ class Robot:
     def _assert_single_axis_S(self, jid):
         """Guard the single-signed-index S assumption these helpers encode.
 
-        The CUDA codegen represents each joint's motion subspace as ONE signed
-        index. A multi-DOF PLANAR / SPHERICAL joint (6xN, N>1 S) breaks that
-        assumption; silently returning the first unit entry would emit WRONG
-        code. Fail loudly instead so the deferred multi-column-S codegen path is
-        reached explicitly. Single-column S (revolute/prismatic/continuous/
-        fixed) is unaffected.
+        The CUDA codegen's FAST PATH represents each joint's motion subspace as
+        ONE signed index. Two distinct things break that:
 
-        The floating-base free-flyer root is EXEMPT: it is also a 6-DOF
-        multi-column S, but it is an established, fully-handled path — existing
-        floating-base codegen (e.g. the `has_linear_axis` query in
-        _inverse_dynamics_gradient) calls these helpers on the root and relies
-        on the first-unit-index of its identity subspace. Raising there would
-        break every floating-base robot's codegen. Only the genuinely-unsupported
-        planar/spherical types (the E4 deferral target) trip the guard.
+        - A multi-DOF PLANAR / SPHERICAL joint (6xN, N>1 S) -> Tier C, deferred.
+        - A single-column SKEW axis (revolute/prismatic with a non-cardinal
+          <axis>): the column has >=2 nonzero entries, so there is no single
+          signed unit index -> Tier B (Phase-6 STAGE 1). Tier B does NOT go
+          through these signed-index helpers; it consumes the dense 6-vector
+          via get_S_by_id. Reaching a signed-index helper with a skew joint is
+          therefore a bug in an un-ported algorithm, so we fail loudly.
+
+        The floating-base free-flyer root is EXEMPT (established 6-DOF path).
         """
         joint = self.get_joint_by_id(jid)
         dof = joint.get_num_dof() if joint is not None else 1
@@ -890,9 +888,45 @@ class Robot:
             raise ValueError(
                 f"Joint {jid} (type '{jtype}', dof={dof}) has a multi-column motion "
                 "subspace; the single-signed-index S helpers do not support it. "
-                "Multi-column-S CUDA emit is deferred (see "
-                "docs/open-tasks/joint_types_plan.md, E4)."
+                "Multi-column-S CUDA emit (Tier C) is deferred (see "
+                "docs/open-tasks/phase6_joint_types_plan_REFRESH.md, item 4)."
             )
+        if not self.S_is_cardinal_by_id(jid):
+            raise ValueError(
+                f"Joint {jid} (type '{jtype}') has a SKEW/general motion subspace "
+                f"column ({self._get_flat_S_by_id(jid)}); it has no single signed "
+                "unit index. Use the Tier-B dense-6-vector path (get_S_by_id). "
+                "This algorithm has not been ported to Tier B yet "
+                "(Phase-6 STAGE 1 covers inverse_dynamics + crba)."
+            )
+
+    def S_is_cardinal_by_id(self, jid):
+        """True if joint `jid`'s motion subspace is a single signed cardinal
+        unit axis (Tier A: exactly one |entry|==1, all others 0). The floating
+        root is treated as cardinal here (its per-column identity subspace is
+        handled by the established multi-column floating path, not Tier B)."""
+        joint = self.get_joint_by_id(jid)
+        if joint is not None and getattr(joint, "jtype", None) == "floating":
+            return True
+        S = self._get_flat_S_by_id(jid)
+        unit_count = sum(1 for v in S if abs(v) == 1)
+        nonzero_count = sum(1 for v in S if v != 0)
+        return unit_count == 1 and nonzero_count == 1
+
+    def robot_has_skew_axis(self):
+        """True if ANY joint carries a Tier-B skew/general single-column S.
+        Codegen uses this to decide (at codegen time) whether to emit the
+        additive Tier-B machinery; an all-cardinal robot stays byte-identical."""
+        for joint in self.joints:
+            jid = joint.get_id()
+            j = self.get_joint_by_id(jid)
+            if j is not None and getattr(j, "jtype", None) in ("floating", "planar", "spherical"):
+                continue
+            if j is not None and j.get_num_dof() == 0:
+                continue
+            if not self.S_is_cardinal_by_id(jid):
+                return True
+        return False
 
     def get_S_index_by_id(self, jid):
         self._assert_single_axis_S(jid)
@@ -956,15 +990,23 @@ class Robot:
         Outputs:
         -   [(int)] - the index of the 1 in each of the n subspace matrices
         """
+        # Tier-B (skew axis) joints have no signed unit index; their Tier-B emit
+        # bakes the dense S column directly (it never reads this table), so we
+        # emit a 0 placeholder to keep the per-jid S_inds table well-formed.
+        # Cardinal robots contain no skew joints, so the table is byte-identical.
+        def _signed_or_placeholder(jid):
+            if self.S_is_cardinal_by_id(jid):
+                return str(self.get_signed_S_index_by_id(jid))
+            return "0"
         if self.floating_base:
             fb_S = self.get_S_by_id(0).T.tolist() # break fb S into each column
             S_inds = []
             for dof in fb_S:
                 S_inds.append(str(next((1 if value > 0 else -1) * (index + 1) for index, value in enumerate(dof) if abs(value) == 1))) # signed one-based unit-axis index
             for jid in range(1,n):
-                S_inds.append(str(self.get_signed_S_index_by_id(jid))) # take the rest
+                S_inds.append(_signed_or_placeholder(jid)) # take the rest
         else:
-            S_inds = [str(self.get_signed_S_index_by_id(jid)) for jid in range(n)]
+            S_inds = [_signed_or_placeholder(jid) for jid in range(n)]
         return S_inds
 
     ######################

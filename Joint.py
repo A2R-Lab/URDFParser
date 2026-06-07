@@ -3,7 +3,7 @@ import math
 import numpy as np
 import sympy as sp
 from .SpatialAlgebra import Origin, Translation, Rotation, Quaternion_Tools
-from .errors import UnsupportedJointTypeError
+from .errors import UnsupportedJointTypeError, URDFParseError
 
 
 def _snap_to_pi_grid(value, tolerance=1e-5):
@@ -169,6 +169,53 @@ class Joint:
             return value
         return None
 
+    def _cardinal_axis(self, axis):
+        """Return (index, sign) if `axis` is a (signed) cardinal unit axis, else None.
+
+        A cardinal axis has exactly one component with |value| == 1 (the other
+        two zero). This is the BYTE-IDENTICAL fast path: cardinal axes route to
+        the existing rz/ry/rx builders and literal `np.array([0,0,±1,...])` S so
+        every current manifest robot parses to the identical S / Xmat_sp.
+        """
+        for index in range(3):
+            scale = self._axis_scale(axis, index)
+            if scale is not None:
+                # Confirm the other two components are zero (a genuine cardinal
+                # axis), not e.g. [1,1,0] whose first comp also has |.|==1 only
+                # after a non-normalized input. axis is already unit-normalized.
+                others = [float(axis[k]) for k in range(3) if k != index]
+                if all(np.isclose(o, 0.0) for o in others):
+                    return index, scale
+        return None
+
+    def _general_axis_unit(self, axis):
+        """Normalize a 3-vector axis to a unit vector (float64)."""
+        a = np.asarray([float(axis[0]), float(axis[1]), float(axis[2])], dtype=np.float64)
+        nrm = np.linalg.norm(a)
+        if nrm == 0.0:
+            raise URDFParseError(
+                f"Joint '{self.name}' has a zero-length <axis>.")
+        return a / nrm
+
+    def _rodrigues_frame(self, u, theta):
+        """Frame-rotation matrix E(theta) about unit axis u, GRiD convention.
+
+        GRiD's rz/ry/rx are the FRAME (coordinate) rotations exp(-[axis]x*theta)
+        (note the sign: rz = [[c,s,0],[-s,c,0],[0,0,1]] = exp(-[z]x theta)). The
+        general-axis frame rotation is therefore Rodrigues with -theta:
+            E = I cos t - [u]x sin t + u u^T (1 - cos t).
+        Cardinal u reduces to exactly rz/ry/rx, so this is consistent with the
+        fast path (the cardinal branch is taken before this for byte-identity).
+        """
+        c = sp.cos(theta)
+        s = sp.sin(theta)
+        ux, uy, uz = sp.Float(u[0]), sp.Float(u[1]), sp.Float(u[2])
+        K = sp.Matrix([[0, -uz, uy], [uz, 0, -ux], [-uy, ux, 0]])
+        uut = sp.Matrix([[ux*ux, ux*uy, ux*uz],
+                         [uy*ux, uy*uy, uy*uz],
+                         [uz*ux, uz*uy, uz*uz]])
+        return sp.eye(3) * c - K * s + uut * (1 - c)
+
     def set_type(self, jtype, axis = None):
         self.jtype = jtype
         self.origin.build_fixed_transform()
@@ -176,44 +223,51 @@ class Joint:
             self.dof = 1
             self.position_symbols = [self.theta]
             self.local_q_dim = 1
-            axis_scale = self._axis_scale(axis, 2)
-            if axis_scale is not None:
-                self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rz(axis_scale * self.theta))
-                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rz(axis_scale * self.theta))
-                self.S = np.array([0,0,axis_scale,0,0,0])
+            cardinal = self._cardinal_axis(axis)
+            if cardinal is not None:
+                # Tier A (cardinal): BYTE-IDENTICAL to the historical emit. One
+                # signed ±1 component selects the rz/ry/rx frame rotation and
+                # the literal [0,0,±1,0,0,0]-style S.
+                index, axis_scale = cardinal
+                rot_builder = (self.origin.rotation.rx, self.origin.rotation.ry,
+                               self.origin.rotation.rz)[index]
+                self.Xmat_sp_free = self.origin.rotation.rot(rot_builder(axis_scale * self.theta))
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(rot_builder(axis_scale * self.theta))
+                S = [0, 0, 0, 0, 0, 0]
+                S[index] = axis_scale
+                self.S = np.array(S)
             else:
-                axis_scale = self._axis_scale(axis, 1)
-                if axis_scale is not None:
-                    self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.ry(axis_scale * self.theta))
-                    self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.ry(axis_scale * self.theta))
-                    self.S = np.array([0,axis_scale,0,0,0,0])
-                else:
-                    axis_scale = self._axis_scale(axis, 0)
-                    if axis_scale is not None:
-                        self.Xmat_sp_free = self.origin.rotation.rot(self.origin.rotation.rx(axis_scale * self.theta))
-                        self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(self.origin.rotation.rx(axis_scale * self.theta))
-                        self.S = np.array([axis_scale,0,0,0,0,0])
+                # Tier B (general / skew axis): Rodrigues frame rotation about
+                # the normalized axis; S = [axis_unit; 0] (a dense angular
+                # column with >=2 nonzero entries).
+                u = self._general_axis_unit(axis)
+                E = self._rodrigues_frame(u, self.theta)
+                self.Xmat_sp_free = self.origin.rotation.rot(E)
+                self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(E)
+                self.S = np.array([u[0], u[1], u[2], 0.0, 0.0, 0.0])
         elif self.jtype == 'prismatic':
             self.dof = 1
             self.position_symbols = [self.theta]
             self.local_q_dim = 1
-            axis_scale = self._axis_scale(axis, 2)
-            if axis_scale is not None:
-                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,0,axis_scale * self.theta))
-                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,0,axis_scale * self.theta)
-                self.S = np.array([0,0,0,0,0,axis_scale])
+            cardinal = self._cardinal_axis(axis)
+            if cardinal is not None:
+                # Tier A (cardinal): BYTE-IDENTICAL to the historical emit.
+                index, axis_scale = cardinal
+                tvec = [0, 0, 0]
+                tvec[index] = axis_scale * self.theta
+                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(*tvec))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(*tvec)
+                S = [0, 0, 0, 0, 0, 0]
+                S[index + 3] = axis_scale
+                self.S = np.array(S)
             else:
-                axis_scale = self._axis_scale(axis, 1)
-                if axis_scale is not None:
-                    self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(0,axis_scale * self.theta,0))
-                    self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(0,axis_scale * self.theta,0)
-                    self.S = np.array([0,0,0,0,axis_scale,0])
-                else:
-                    axis_scale = self._axis_scale(axis, 0)
-                    if axis_scale is not None:
-                        self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(axis_scale * self.theta,0,0))
-                        self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(axis_scale * self.theta,0,0)
-                        self.S = np.array([0,0,0,axis_scale,0,0])
+                # Tier B (general / skew axis): translation along the unit axis;
+                # S = [0; axis_unit] (a dense linear column).
+                u = self._general_axis_unit(axis)
+                tvec = [u[0] * self.theta, u[1] * self.theta, u[2] * self.theta]
+                self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(*tvec))
+                self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(*tvec)
+                self.S = np.array([0.0, 0.0, 0.0, u[0], u[1], u[2]])
         elif self.jtype == 'fixed':
             self.dof = 0
             self.position_symbols = []
