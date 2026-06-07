@@ -37,6 +37,14 @@ Internally the parser and downstream dynamics code normalize floating-base state
 into the Pinocchio-style convention so generated code and reference algorithms
 stay consistent under the hood.
 
+## Supported joint types:
+Revolute, continuous, prismatic, and fixed joints are fully supported, as are
+**mimic** joints. An arbitrary/skew `<axis>` (a non-cardinal direction) is parsed
+into a dense 6-vector motion subspace `S` — downstream codegen consumes this for
+`inverse_dynamics` and `crba` (stage 1; cardinal-axis robots stay byte-identical).
+Helical, planar, and spherical joint types are not yet parsed. Closed kinematic
+loops are unsupported.
+
 ## Installation Instructions:
 There are 4 required packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
 ```shell
