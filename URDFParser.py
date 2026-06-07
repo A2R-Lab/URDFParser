@@ -19,7 +19,13 @@ class URDFParser:
         alpha_tie_breaker = None,
         joint_ordering = "pinocchio_order",
         floating_base_convention = "pinocchio",
+        strict_inertial = False,
     ):
+        # strict_inertial defaults to False (lenient) to preserve every existing
+        # flow: a missing/degenerate <inertial> is silently zeroed as today. When
+        # True, a degenerate inertial on a real (non-root, non-dummy) link raises
+        # URDFParseError naming the link instead of producing broken dynamics.
+        self.strict_inertial = strict_inertial
         Joint.floating_base = floating_base
         try:
             # parse the file
@@ -86,6 +92,10 @@ class URDFParser:
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
                 curr_link.set_inertia(0, 0, 0, 0, 0, 0, 0)
+                # Record the absence so strict validation can flag it if this
+                # turns out NOT to be the root (a real moving body with no
+                # <inertial> declared). Lenient mode keeps the legacy zeroing.
+                curr_link.missing_inertial = True
             else:
                 raw_origin = raw_inertial.find("origin")
                 if raw_origin is None:
@@ -135,8 +145,16 @@ class URDFParser:
             raw_dynamics = raw_joint.find("dynamics")
             if raw_dynamics is None:
                 curr_joint.set_damping(0)
+                curr_joint.set_friction(0)
             else:
-                curr_joint.set_damping(float(raw_dynamics["damping"]))
+                # Both <dynamics> attributes are optional per the URDF spec; a
+                # missing attribute defaults to 0 (a no-op bias term).
+                curr_joint.set_damping(
+                    float(raw_dynamics["damping"]) if raw_dynamics.has_attr("damping") else 0
+                )
+                curr_joint.set_friction(
+                    float(raw_dynamics["friction"]) if raw_dynamics.has_attr("friction") else 0
+                )
 
             # parse limits (upper/lower)
             raw_limit = raw_joint.find("limit")
@@ -357,6 +375,30 @@ class URDFParser:
         # resolve <mimic> targets now that final jids are stable
         self.resolve_mimic_targets()
         self.robot.refresh_joint_metadata()
+        # the renumbered root link is the (intentionally massless) base frame;
+        # flag it so strict inertial validation never rejects it.
+        root_link = self.robot.get_link_by_name(root_link_name)
+        if root_link is not None:
+            root_link.set_dummy(True)
+        self.validate_inertials(root_link_name)
+
+    def validate_inertials(self, root_link_name):
+        """Strict-mode guard: reject a degenerate <inertial> on a real moving
+        body. The root/base frame and any dummy links are exempt (intentionally
+        massless). Lenient mode (the default) is a no-op, preserving the legacy
+        silent-zeroing behavior for every existing flow."""
+        if not getattr(self, "strict_inertial", False):
+            return
+        for link in self.robot.get_links_ordered_by_id():
+            if link.get_name() == root_link_name or link.is_dummy_link():
+                continue
+            if getattr(link, "missing_inertial", False) or link.has_degenerate_inertial():
+                raise URDFParseError(
+                    f"Link '{link.get_name()}' has a degenerate/missing <inertial> "
+                    "(zero or non-positive-definite mass/inertia). This produces "
+                    "broken dynamics. Provide a valid <inertial>, or parse with "
+                    "strict_inertial=False to keep the legacy silent-zeroing."
+                )
 
     def resolve_mimic_targets(self):
         """Resolve each mimic joint's `mimic_joint_name` to its current jid.

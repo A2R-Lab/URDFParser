@@ -15,6 +15,12 @@ class Link:
         self.mass = None
         self.inertia = None
         self.spatial_ineratia = None
+        # True for intentionally-massless links (the world base frame, or a
+        # decomposition dummy link). Distinguishes a legitimate zero-inertia
+        # link from a degenerate <inertial> on a real moving body, which strict
+        # parse mode must reject. See is_world_base_frame (the heuristic trap:
+        # ANY mass==0 link reads as the world base unless flagged otherwise).
+        self.is_dummy = False
 
     def set_id(self, id_in):
         self.lid = id_in
@@ -109,3 +115,31 @@ class Link:
             return True
         else:
             return False
+
+    def set_dummy(self, is_dummy=True):
+        self.is_dummy = is_dummy
+
+    def is_dummy_link(self):
+        return self.is_dummy
+
+    def has_degenerate_inertial(self):
+        """Structurally-degenerate <inertial>: zero/negative mass, or an inertia
+        tensor that is not symmetric-positive-definite (zero, negative, or with
+        an off-diagonal that breaks PD). Such a link cannot carry dynamics for a
+        real moving body (e.g. rizon4's zero-inertia links). Returns False for an
+        intentionally-massless dummy/world link (those are flagged is_dummy)."""
+        if self.is_dummy:
+            return False
+        if self.mass is None or self.inertia is None:
+            return True
+        if self.mass <= 0:
+            return True
+        M = self.inertia.to_matrix().astype(float)
+        if np.allclose(M, 0.0):
+            return True
+        # symmetric (it is by construction) positive-definite check
+        try:
+            eigvals = np.linalg.eigvalsh(M)
+        except np.linalg.LinAlgError:
+            return True
+        return bool(np.min(eigvals) <= 0.0)

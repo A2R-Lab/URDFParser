@@ -403,6 +403,20 @@ class Robot:
     def get_damping_by_id(self, jid):
         return self.get_joint_by_id(jid).get_damping()
 
+    def get_friction_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_friction()
+
+    def robot_has_joint_damping(self):
+        """True if ANY joint declares nonzero viscous damping. Codegen gates the
+        additive damping bias on this so a robot without damping (the common
+        case) emits byte-identical CUDA."""
+        return any(float(getattr(j, "damping", 0) or 0) != 0.0 for j in self.joints)
+
+    def robot_has_joint_friction(self):
+        """True if ANY joint declares nonzero Coulomb friction. Same byte-neutral
+        codegen gate as robot_has_joint_damping."""
+        return any(float(getattr(j, "friction", 0) or 0) != 0.0 for j in self.joints)
+
     def get_joint_position_dim_by_id(self, jid):
         return self.get_joint_by_id(jid).get_local_q_dim()
 

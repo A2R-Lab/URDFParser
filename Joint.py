@@ -43,7 +43,8 @@ class Joint:
         self.Xmat_sp_hom = None      # Sympy X homogenous 4x4 matrix placeholder
         self.Xmat_sp_hom_free = None # Sympy X_free homogenous 4x4  matrix placeholder
         self.Smat_sp = None      # Sympy S matrix placeholder (usually a vector)
-        self.damping = 0         # damping placeholder
+        self.damping = 0         # viscous damping coefficient (tau += damping*qd)
+        self.friction = 0        # Coulomb friction coefficient (tau += friction*sign(qd))
         self.dof = 0             # dof placeholder
         # for floating base
         self.using_quaternion = using_quaternion
@@ -113,6 +114,9 @@ class Joint:
 
     def set_damping(self, damping):
         self.damping = damping
+
+    def set_friction(self, friction):
+        self.friction = friction
 
     def set_transformation_matrix(self, matrix_in):
         self.Xmat_sp = matrix_in
@@ -535,6 +539,9 @@ class Joint:
 
     def get_damping(self):
         return self.damping
+
+    def get_friction(self):
+        return self.friction
 
     def get_name(self):
         return self.name
