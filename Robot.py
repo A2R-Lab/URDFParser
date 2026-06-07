@@ -842,6 +842,13 @@ class Robot:
     def get_Imats_ordered_by_name(self, reverse = False):
         return [link.get_spatial_inertia() for link in self.get_links_ordered_by_name(reverse)]
 
+    def get_inertia_params_ordered_by_id(self, reverse = False):
+        # Per-link 10-vector [m, h(3)=m*c, I_O(6)] in the frozen GRiD/URDF
+        # regressor basis (see Link.get_inertia_params). Body-indexed, mimic-
+        # agnostic (inertia is per LINK, never reduced DoF) — mirrors the
+        # shipped inverse_dynamics_regressor's NB-wide parameter layout.
+        return [link.get_inertia_params() for link in self.get_links_ordered_by_id(reverse)]
+
     def get_Imats_dict_by_id(self):
         return {link.lid:link.get_spatial_inertia() for link in self.links}
 

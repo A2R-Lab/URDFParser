@@ -67,6 +67,25 @@ class Link:
     def get_spatial_inertia(self):
         return self.spatial_ineratia
 
+    def get_inertia_params(self):
+        # The 10 standard inertial parameters in the FROZEN GRiD/URDF regressor
+        # basis (matches GRiDCodeGenerator/algorithms/_regressor.py:41-67 and
+        # RBDReference/_regressor.py _BASIS_I):
+        #   pi = [ m, h(3)=m*c, I_O(6)=[Ixx,Ixy,Ixz,Iyy,Iyz,Izz] ]
+        # with I_O the inertia about the link-frame ORIGIN and the 6x6
+        #   I(pi) = [[ I_O,        skew(h) ],
+        #            [ skew(h)^T,  m * I3  ]].
+        # Read these VERBATIM out of the already-built baked 6x6 so the on-device
+        # divide-free scatter reconstructs the identical 6x6 BIT-FOR-BIT (the
+        # mccT parallel-axis term is already folded into the stored top-left).
+        S = self.spatial_ineratia
+        m = S[3, 3]
+        # top-right block TR = skew(h): hx=TR[2,1], hy=TR[0,2], hz=TR[1,0]
+        h = [S[2, 3 + 1], S[0, 3 + 2], S[1, 3 + 0]]
+        # top-left block TL = I_O (symmetric): [Ixx,Ixy,Ixz,Iyy,Iyz,Izz]
+        I_O = [S[0, 0], S[0, 1], S[0, 2], S[1, 1], S[1, 2], S[2, 2]]
+        return [m] + h + I_O
+
     def get_name(self):
         return self.name
 
