@@ -61,13 +61,11 @@ class Robot:
         return offset
 
     def get_joint_index_f(self, joint_id):
-        # Same convention as v indexing for non-floating joints; the
-        # floating-base root maps to the 6-wide free-flyer block.
-        if self.floating_base:
-            if joint_id == 0:
-                return [0, 1, 2, 3, 4, 5]
-            return self._dense_v_offset(joint_id)
-        return self._dense_v_offset(joint_id)
+        # Generalized-force slots map identically to the velocity slots: the
+        # RNEA backward pass projects c[inds_f] = S^T f, an NV-vector. So this
+        # returns the SAME scalar (1-DOF) or contiguous block (multi-DOF:
+        # floating root 6-wide, spherical/planar 3-wide) as get_joint_index_v.
+        return self.get_joint_index_v(joint_id)
 
     def uses_legacy_floating_base_convention(self):
         return self.floating_base and self.floating_base_convention == "legacy"

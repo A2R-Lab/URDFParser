@@ -384,10 +384,22 @@ class Joint:
             self.position_symbols = [self.q1_sph, self.q2_sph, self.q3_sph, self.q4_sph]
             self.local_q_dim = 4
             self.qt = Quaternion_Tools()
+            # quat_to_rot_sp returns the FORWARD (child->parent) rotation R(quat).
+            # The SPATIAL motion transform X (parent->child frame) uses the FRAME
+            # rotation R^T (matching rz/ry/rx, which return exp(-[axis]theta)=R^T).
+            # A mid-chain spherical joint is consumed directly in the v/a
+            # recursion (X @ v_parent) with NO inverse at the use-site (unlike the
+            # floating ROOT, whose fpass explicitly inverts Xmat), so the
+            # transpose must be baked into the spatial X here. Without it the
+            # rotation is applied backwards and the gravity/Coriolis recursion
+            # diverges from Pinocchio.
             quat_rot = self.qt.quat_to_rot_sp(
                 self.q1_sph, self.q2_sph, self.q3_sph, self.q4_sph
             )
-            self.Xmat_sp_free = self.origin.rotation.rot(quat_rot)
+            self.Xmat_sp_free = self.origin.rotation.rot(quat_rot.transpose())
+            # The HOMOGENEOUS transform encodes the forward child->parent pose
+            # (used for EE/world kinematics), so it keeps R (no transpose), the
+            # same convention the floating root's hom uses.
             self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(quat_rot)
             # 6x3 angular-only motion subspace in internal [w;v] order.
             self.S = np.array(
