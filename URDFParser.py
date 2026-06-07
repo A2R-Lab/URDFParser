@@ -160,7 +160,13 @@ class URDFParser:
             if raw_axis is None:
                 curr_joint.set_type(raw_joint["type"])
             else:
-                curr_joint.set_type(raw_joint["type"],self.to_float(raw_axis["xyz"]))
+                # HELICAL/SCREW (extension): URDF has no native helical type, so
+                # the screw pitch is carried on the <axis> as a custom `pitch`
+                # attribute (meters / radian, matching pinocchio's convention
+                # translation = pitch * angle). It is ignored for non-helical
+                # types. e.g. <axis xyz="0 0 1" pitch="0.05"/>.
+                pitch = float(raw_axis["pitch"]) if raw_axis.has_attr("pitch") else 0.0
+                curr_joint.set_type(raw_joint["type"], self.to_float(raw_axis["xyz"]), pitch=pitch)
             raw_dynamics = raw_joint.find("dynamics")
             if raw_dynamics is None:
                 curr_joint.set_damping(0)

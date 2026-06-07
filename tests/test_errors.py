@@ -27,7 +27,7 @@ def _write_urdf(tmp_path, joint_xml, name="bot"):
     return str(path)
 
 
-@pytest.mark.parametrize("bad_type", ["screw", "helical", "bogus", "floating2"])
+@pytest.mark.parametrize("bad_type", ["bogus", "floating2", "wheel", "gimbal"])
 def test_unsupported_joint_type_raises_typed_error(tmp_path, bad_type):
     """An unsupported joint type raises a catchable typed error, not exit()."""
     urdf = _write_urdf(
@@ -49,7 +49,7 @@ def test_unsupported_joint_type_caught_as_base_class(tmp_path):
     """Callers can catch the whole family with the base URDFParseError."""
     urdf = _write_urdf(
         tmp_path,
-        '<joint name="weird" type="screw"><parent link="base"/>'
+        '<joint name="weird" type="bogus"><parent link="base"/>'
         '<child link="l1"/><axis xyz="0 0 1"/></joint>',
     )
     with pytest.raises(URDFParseError):
@@ -63,7 +63,7 @@ def test_set_type_raises_directly():
     j.set_origin_xyz([0.0, 0.0, 0.0])
     j.set_origin_rpy([0.0, 0.0, 0.0])
     with pytest.raises(UnsupportedJointTypeError):
-        j.set_type("screw", [0.0, 0.0, 1.0])
+        j.set_type("bogus", [0.0, 0.0, 1.0])
 
 
 def test_valid_revolute_still_parses(tmp_path):

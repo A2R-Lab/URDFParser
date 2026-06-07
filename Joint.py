@@ -220,7 +220,7 @@ class Joint:
                          [uz*ux, uz*uy, uz*uz]])
         return sp.eye(3) * c - K * s + uut * (1 - c)
 
-    def set_type(self, jtype, axis = None):
+    def set_type(self, jtype, axis = None, pitch = 0.0):
         self.jtype = jtype
         self.origin.build_fixed_transform()
         if self.jtype in ('revolute', 'continuous'):
@@ -272,6 +272,52 @@ class Joint:
                 self.Xmat_sp_free = self.origin.translation.xlt(self.origin.translation.skew(*tvec))
                 self.Xmat_sp_hom_free = self.origin.translation.gen_tx_hom(*tvec)
                 self.S = np.array([0.0, 0.0, 0.0, u[0], u[1], u[2]])
+        elif self.jtype in ('helical', 'screw'):
+            # HELICAL / SCREW (1-DOF, NQ=NV=1): a single scalar theta drives
+            # COUPLED rotation about and translation along the SAME axis, with
+            # translation = pitch * theta (pitch in meters/radian, pinocchio's
+            # JointModelHelical convention). The config-space update is a plain
+            # vector add (no manifold), exactly like revolute/prismatic.
+            #
+            # The motion subspace is a SINGLE column with a coupled linear part:
+            #   S = [axis_unit ; pitch * axis_unit].
+            # Even a CARDINAL axis gives >=2 nonzero entries, so a helical joint
+            # is INTRINSICALLY Tier B (non-cardinal S) -> S_is_cardinal_by_id
+            # returns False -> robot_has_skew_axis() trips -> the algos take the
+            # dense-6-vector Tier-B path (built/validated by joint-1b). No new
+            # algorithm/codegen code: the ONLY new thing here is the coupled
+            # linear rows of S.
+            #
+            # The spatial transform is the screw motion exp(theta * S^):
+            #   X = rot(axis, theta) composed with xlt(pitch * theta * axis).
+            # Rotation and translation share the axis, so they commute; we apply
+            # the rotation (Rodrigues frame matrix, byte-consistent with the
+            # cardinal rz/ry/rx) then the axial translation. This reuses the
+            # general-axis machinery from STAGE 1 verbatim.
+            self.dof = 1
+            self.position_symbols = [self.theta]
+            self.local_q_dim = 1
+            u = self._general_axis_unit(axis)
+            E = self._rodrigues_frame(u, self.theta)
+            tvec = [u[0] * pitch * self.theta,
+                    u[1] * pitch * self.theta,
+                    u[2] * pitch * self.theta]
+            X_rot = self.origin.rotation.rot(E)
+            X_xlt = self.origin.translation.xlt(self.origin.translation.skew(*tvec))
+            self.Xmat_sp_free = X_rot * X_xlt
+            # Homogeneous (forward child->parent pose). The variable axial
+            # translation tvec sits in the joint frame exactly like prismatic's
+            # gen_tx_hom translation, and the rotation block is E exactly like
+            # revolute's rot_hom(rz). Routing through the SINGLE-DOF hom path
+            # below (NOT the floating/planar path) then rotates tvec through the
+            # origin and transposes the rotation block, the same convention every
+            # revolute/prismatic joint uses -- so helical composes the two
+            # consistently with no special-casing.
+            self.Xmat_sp_hom_free = self.origin.rotation.rot_hom(E)
+            self.Xmat_sp_hom_free[:3, 3] = sp.Matrix(tvec)
+            # Coupled single-column motion subspace [w; v] = [axis; pitch*axis].
+            self.S = np.array([u[0], u[1], u[2],
+                               pitch * u[0], pitch * u[1], pitch * u[2]])
         elif self.jtype == 'fixed':
             self.dof = 0
             self.position_symbols = []

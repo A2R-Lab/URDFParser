@@ -38,12 +38,26 @@ into the Pinocchio-style convention so generated code and reference algorithms
 stay consistent under the hood.
 
 ## Supported joint types:
-Revolute, continuous, prismatic, and fixed joints are fully supported, as are
-**mimic** joints. An arbitrary/skew `<axis>` (a non-cardinal direction) is parsed
-into a dense 6-vector motion subspace `S` — downstream codegen consumes this for
-`inverse_dynamics` and `crba` (stage 1; cardinal-axis robots stay byte-identical).
-Helical, planar, and spherical joint types are not yet parsed. Closed kinematic
-loops are unsupported.
+Revolute, continuous, prismatic, fixed, **helical/screw**, planar, and spherical
+joints are supported, as are **mimic** joints. An arbitrary/skew `<axis>` (a
+non-cardinal direction) is parsed into a dense 6-vector motion subspace `S`; such
+joints (and helical joints, whose `S` is intrinsically coupled) take the general
+Tier-B code path, while cardinal-axis robots stay byte-identical.
+
+**Helical / screw joints** (`<joint type="helical">` or `type="screw"`) are a
+1-DOF (NQ=NV=1) extension: a single coordinate `θ` drives coupled rotation about
+and translation along the SAME axis, with motion subspace `S = [axis; pitch·axis]`.
+URDF has no native helical type, so the screw **pitch** is carried as a custom
+`pitch` attribute on `<axis>`:
+
+```xml
+<joint type="helical">          <!-- or type="screw" -->
+  <axis xyz="0 0 1" pitch="0.05"/>   <!-- translation = pitch · θ -->
+</joint>
+```
+
+The convention is `pitch` in **meters / radian** (translation = `pitch · angle`),
+matching Pinocchio's `JointModelHelical`. Closed kinematic loops are unsupported.
 
 ## Installation Instructions:
 There are 4 required packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
