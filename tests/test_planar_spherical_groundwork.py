@@ -95,16 +95,30 @@ def test_planar_transform_function_consumes_three_coordinates():
     np.testing.assert_allclose(X2[:3, 3], [0.0, 0.0, 0.0], atol=1e-9)
 
 
-def test_planar_robot_parses_with_three_dof_block(tmp_path):
+def test_planar_robot_parses_into_decomposed_cardinal_chain(tmp_path):
+    """STAGE 3: a planar joint is DECOMPOSED at parse time into 3 cardinal 1-DOF
+    sub-joints (prismatic X -> prismatic Y -> revolute Z) joined by 2 zero-mass
+    dummy links. NV/NQ still total 3 (a vector group), but they are now carried
+    by three scalar sub-joints (each a single q/v slot) rather than one 3-DOF
+    block. The native 6x3 `Joint.set_type('planar')` representation above is kept
+    only as the numpy-reference oracle; the parser emits the decomposed chain so
+    every downstream algorithm sees ordinary cardinal joints (Tier A)."""
     urdf = _single_joint_urdf(tmp_path, "planar")
     with contextlib.redirect_stdout(io.StringIO()):
         robot = URDFParser().parse(urdf)
     assert robot is not None
     assert robot.get_num_vel() == 3
     assert robot.get_num_pos() == 3   # planar is a vector group: NQ == NV
-    jid = robot.get_joints_ordered_by_id()[0].get_id()
-    assert robot.get_joint_index_q(jid) == [0, 1, 2]
-    assert robot.get_joint_index_v(jid) == [0, 1, 2]
+    assert robot.get_num_joints() == 3   # 3 cardinal sub-joints
+    sub_types = [robot.get_joint_type_by_id(j) for j in range(3)]
+    # the normal-axis rotation is unbounded -> CONTINUOUS (handled as revolute
+    # dynamically, but with no joint-limit entry)
+    assert sub_types == ["prismatic", "prismatic", "continuous"]
+    # each sub-joint owns a single consecutive q/v slot, in [px, py, theta] order
+    for j in range(3):
+        assert robot.get_joint_index_q(j) == j
+        assert robot.get_joint_index_v(j) == j
+        assert robot.S_is_cardinal_by_id(j)
 
 
 def test_spherical_robot_parses_with_quaternion_nq_offset(tmp_path):

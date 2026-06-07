@@ -118,9 +118,28 @@ class URDFParser:
             # store
             self.robot.add_link(copy.deepcopy(curr_link))
 
+    # Multi-DOF joint types that are DECOMPOSED at parse time into a chain of
+    # cardinal 1-DOF sub-joints + zero-mass dummy links (Phase-6 STAGE 3). The
+    # decomposition is EXACT (a Featherstone reduction through massless links)
+    # and routes every emitted joint through the byte-identical Tier-A cardinal
+    # machinery, so NO downstream algorithm / kernel code changes. The native
+    # 6x3 `Joint.set_type('planar')` representation is retained only as the
+    # numpy-reference oracle; the PARSER emits the decomposed chain. SPHERICAL is
+    # NOT here (a manifold, cannot decompose -- stage 4).
+    _DECOMPOSED_JOINT_TYPES = ("planar", "translation", "cartesian")
+
     def parse_joints(self):
         jid = 0
         for raw_joint in self.soup.find_all('joint', recursive=False):
+            jtype = raw_joint["type"]
+            if jtype in self._DECOMPOSED_JOINT_TYPES:
+                # A multi-DOF translation/planar joint expands into a chain of
+                # cardinal 1-DOF sub-joints + intermediate dummy links. The
+                # chain's user-facing (q, v) order matches the native joint's
+                # coordinate order (planar: [px, py, theta]; translation:
+                # [x, y, z]) so a user config round-trips through the sub-joints.
+                jid = self._decompose_multidof_joint(raw_joint, jtype, jid)
+                continue
             # construct joint object
             curr_joint = Joint(raw_joint["name"], jid, \
                                raw_joint.find("parent")["link"], \
@@ -197,6 +216,127 @@ class URDFParser:
 
             # store
             self.robot.add_joint(copy.deepcopy(curr_joint))
+
+    def _cardinal_normal_index(self, axis):
+        """Return the index (0/1/2) of a cardinal plane-normal <axis> (default
+        +Z). Skew planar normals are not decomposed (would need non-cardinal
+        in-plane axes); the parser rejects them rather than emit wrong dynamics."""
+        a = np.asarray(axis, dtype=np.float64)
+        nrm = np.linalg.norm(a)
+        if nrm == 0.0:
+            raise URDFParseError("Planar joint has a zero-length plane-normal <axis>.")
+        a = a / nrm
+        for index in range(3):
+            if np.isclose(abs(a[index]), 1.0) and all(
+                np.isclose(a[k], 0.0) for k in range(3) if k != index
+            ):
+                return index
+        raise URDFParseError(
+            "Planar joint with a non-cardinal plane-normal axis "
+            f"{list(axis)} is not supported by parse-time decomposition "
+            "(only cardinal normals X/Y/Z)."
+        )
+
+    def _make_cardinal_unit(self, index):
+        v = [0.0, 0.0, 0.0]
+        v[index] = 1.0
+        return v
+
+    def _decompose_multidof_joint(self, raw_joint, jtype, jid):
+        """Decompose a planar / translation joint into a chain of cardinal 1-DOF
+        sub-joints joined by zero-mass dummy links (Phase-6 STAGE 3).
+
+        The decomposition is EXACT: stacking the cardinal translations/rotation
+        through massless intermediate links reproduces the multi-DOF joint's
+        transform and motion subspace, while every emitted sub-joint is a
+        cardinal 1-DOF revolute/prismatic -> Tier-A byte-identical machinery
+        (no new kernel code). The chain's (q, v) order matches the native
+        coordinate order so a user config round-trips.
+
+          planar  -> prismatic(in-plane axis a) -> prismatic(in-plane axis b)
+                     -> revolute(plane normal)        [2 dummy links]
+          translation/cartesian -> prismatic X -> prismatic Y -> prismatic Z
+                                                              [2 dummy links]
+
+        The ORIGINAL joint's <origin> (fixed parent transform) is placed on the
+        FIRST sub-joint; the rest are identity (the variable transforms compose
+        in the joint frame, so the fixed offset belongs at the head of the
+        chain). <dynamics damping/friction> apply to every sub-joint (per-DOF,
+        matching pinocchio); both default to 0 -> byte-neutral.
+        """
+        name = raw_joint["name"]
+        parent = raw_joint.find("parent")["link"]
+        child = raw_joint.find("child")["link"]
+        if raw_joint.find("mimic") is not None:
+            raise URDFParseError(
+                f"Joint '{name}' ({jtype}) is decomposed at parse time and "
+                "cannot also be a <mimic> joint.")
+        raw_origin = raw_joint.find("origin")
+        if raw_origin is None:
+            origin_xyz, origin_rpy = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+        else:
+            origin_xyz = self.to_float(raw_origin["xyz"]) if raw_origin.has_attr("xyz") else [0.0, 0.0, 0.0]
+            origin_rpy = self.to_float(raw_origin["rpy"]) if raw_origin.has_attr("rpy") else [0.0, 0.0, 0.0]
+        raw_dynamics = raw_joint.find("dynamics")
+        damping = friction = 0.0
+        if raw_dynamics is not None:
+            damping = float(raw_dynamics["damping"]) if raw_dynamics.has_attr("damping") else 0.0
+            friction = float(raw_dynamics["friction"]) if raw_dynamics.has_attr("friction") else 0.0
+
+        # Build the ordered list of (sub-joint type, cardinal axis). The order
+        # IS the user-facing (q, v) order.
+        if jtype == "planar":
+            raw_axis = raw_joint.find("axis")
+            normal = self.to_float(raw_axis["xyz"]) if raw_axis is not None else [0.0, 0.0, 1.0]
+            n_index = self._cardinal_normal_index(normal)
+            in_plane = [k for k in range(3) if k != n_index]
+            steps = [
+                ("prismatic", self._make_cardinal_unit(in_plane[0])),
+                ("prismatic", self._make_cardinal_unit(in_plane[1])),
+                # CONTINUOUS (not revolute): a URDF planar joint imposes NO limit
+                # on the in-plane rotation -- continuous is handled identically to
+                # revolute in the dynamics, but is correctly treated as unbounded
+                # (no joint-limit table entry). Using `revolute` here would emit an
+                # infinite limit literal.
+                ("continuous", self._make_cardinal_unit(n_index)),
+            ]
+        else:  # translation / cartesian: pure 3-DOF translation
+            steps = [
+                ("prismatic", self._make_cardinal_unit(0)),
+                ("prismatic", self._make_cardinal_unit(1)),
+                ("prismatic", self._make_cardinal_unit(2)),
+            ]
+
+        nsteps = len(steps)
+        # Intermediate dummy links (nsteps - 1): zero-mass, zero-inertia, flagged
+        # is_dummy so the world-base-frame heuristic + strict-inertial check skip
+        # them (a massless link is NOT the base just because it has no inertia).
+        dummy_names = [f"{name}__dummy{k}" for k in range(nsteps - 1)]
+        for dname in dummy_names:
+            dummy = Link(dname, len(self.robot.links))
+            dummy.set_origin_xyz([0.0, 0.0, 0.0])
+            dummy.set_origin_rpy([0.0, 0.0, 0.0])
+            dummy.set_inertia(0, 0, 0, 0, 0, 0, 0)
+            dummy.set_dummy(True)
+            self.robot.add_link(copy.deepcopy(dummy))
+
+        chain_links = [parent] + dummy_names + [child]
+        for k, (sub_type, axis) in enumerate(steps):
+            sub_name = f"{name}__sub{k}" if nsteps > 1 else name
+            sub = Joint(sub_name, jid, chain_links[k], chain_links[k + 1])
+            jid += 1
+            if k == 0:
+                sub.set_origin_xyz(origin_xyz)
+                sub.set_origin_rpy(origin_rpy)
+            else:
+                sub.set_origin_xyz([0.0, 0.0, 0.0])
+                sub.set_origin_rpy([0.0, 0.0, 0.0])
+            sub.set_type(sub_type, axis)
+            sub.set_damping(damping)
+            sub.set_friction(friction)
+            sub.joint_limits = [float("-inf"), float("inf")]
+            self.robot.add_joint(copy.deepcopy(sub))
+        return jid
 
     def remove_fixed_joints(self):
         # start at the leaves and work upwards
