@@ -398,6 +398,15 @@ class Robot:
     def get_joint_by_parent_child_name(self, parent_name, child_name):
         return self.next_none(filter(lambda fjoint: fjoint.parent == parent_name and fjoint.child == child_name, self.joints))
 
+    def get_joint_limits_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_joint_limits()
+
+    def get_velocity_limit_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_velocity_limit()
+
+    def get_effort_limit_by_id(self, jid):
+        return self.get_joint_by_id(jid).get_effort_limit()
+
     def get_damping_by_id(self, jid):
         return self.get_joint_by_id(jid).get_damping()
 

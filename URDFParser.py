@@ -201,6 +201,14 @@ class URDFParser:
 
                 curr_joint.joint_limits = [lower, upper]
 
+                # velocity / effort limits (both optional per URDF spec; metadata
+                # only — surfaced on the handle, not consumed by any kernel).
+                if raw_limit is not None:
+                    if raw_limit.has_attr("velocity"):
+                        curr_joint.set_velocity_limit(float(raw_limit["velocity"]))
+                    if raw_limit.has_attr("effort"):
+                        curr_joint.set_effort_limit(float(raw_limit["effort"]))
+
             # parse <mimic> tag (record by name; resolve to jid post-renumber).
             raw_mimic = raw_joint.find("mimic")
             if raw_mimic is not None:

@@ -69,6 +69,8 @@ class Joint:
         self.q3_sph = sp.symbols("q3_sph")
         self.q4_sph = sp.symbols("q4_sph")
         self.joint_limits = []
+        self.velocity_limit = None   # |qd| <= velocity_limit (None => +inf / unspecified)
+        self.effort_limit = None     # |tau| <= effort_limit  (None => +inf / unspecified)
         self.position_symbols = []
         self.local_q_dim = 0
         self.dXmat_sp_hom_blocks = []
@@ -656,6 +658,18 @@ class Joint:
     
     def get_joint_limits(self):
         return self.joint_limits
+
+    def set_velocity_limit(self, v):
+        self.velocity_limit = v
+
+    def get_velocity_limit(self):
+        return self.velocity_limit
+
+    def set_effort_limit(self, e):
+        self.effort_limit = e
+
+    def get_effort_limit(self):
+        return self.effort_limit
 
 # Need to retain fixed joints for possible kinematic use later
 class Fixed_Joint:
