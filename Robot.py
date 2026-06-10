@@ -934,6 +934,23 @@ class Robot:
         nonzero_count = sum(1 for v in S if v != 0)
         return unit_count == 1 and nonzero_count == 1
 
+    def robot_has_spherical(self):
+        """True if ANY (non-mimic) joint is a SPHERICAL (3-DoF ball) joint.
+
+        Codegen uses this to decide AT CODEGEN TIME whether to emit the additive
+        Tier-C spherical machinery (multi-column angular-identity S forward/back
+        + the 4-wide quaternion q-block transform). A robot with no spherical
+        joint never enters those branches, so its CUDA stays byte-identical to
+        the all-cardinal path. (The planar 3-DoF joint is decomposed into
+        cardinal sub-joints at parse time, so it never reaches here; only the
+        spherical manifold joint survives as a true multi-column non-root S.)"""
+        for joint in self.joints:
+            if getattr(joint, "is_mimic", False):
+                continue
+            if getattr(joint, "jtype", None) == "spherical":
+                return True
+        return False
+
     def robot_has_skew_axis(self):
         """True if ANY joint carries a Tier-B skew/general single-column S.
         Codegen uses this to decide (at codegen time) whether to emit the
@@ -996,7 +1013,18 @@ class Robot:
         - (bool) - True/False whether all joints have the same subspace matrix
         """
         if self.floating_base: return False
-        return all(all(self.get_S_by_id(jid) == self.get_S_by_id(jids[0])) for jid in jids)
+        # Multi-column motion subspaces (spherical 6x3) can't be "identical" to a
+        # single-column revolute/prismatic S and would crash the elementwise
+        # compare below (shape mismatch -> ambiguous truth value). A robot with
+        # any multi-DoF non-root joint is never uniform-S, so report False (the
+        # topology-helper path emits per-joint S). For an all-single-DoF robot
+        # this is byte-identical to the legacy elementwise compare.
+        S0 = np.asarray(self.get_S_by_id(jids[0]))
+        for jid in jids:
+            Sj = np.asarray(self.get_S_by_id(jid))
+            if Sj.shape != S0.shape or not np.array_equal(Sj, S0):
+                return False
+        return True
     
     def get_S_inds(self, n):
         """
