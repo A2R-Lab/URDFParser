@@ -934,6 +934,11 @@ class Robot:
         nonzero_count = sum(1 for v in S if v != 0)
         return unit_count == 1 and nonzero_count == 1
 
+    def joint_is_spherical(self, jid):
+        """True if joint `jid` is a SPHERICAL (3-DoF ball) joint. Per-JOINT peer of
+        S_is_cardinal_by_id / robot_has_spherical (the per-ROBOT any())."""
+        return getattr(self.get_joint_by_id(jid), "jtype", None) == "spherical"
+
     def robot_has_spherical(self):
         """True if ANY (non-mimic) joint is a SPHERICAL (3-DoF ball) joint.
 
