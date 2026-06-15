@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import sympy as sp
 import copy
+import warnings
 from .Robot import Robot
 from .Link import Link
 from .Joint import Joint, Fixed_Joint
@@ -537,22 +538,25 @@ class URDFParser:
         self.validate_inertials(root_link_name)
 
     def validate_inertials(self, root_link_name):
-        """Strict-mode guard: reject a degenerate <inertial> on a real moving
-        body. The root/base frame and any dummy links are exempt (intentionally
-        massless). Lenient mode (the default) is a no-op, preserving the legacy
-        silent-zeroing behavior for every existing flow."""
-        if not getattr(self, "strict_inertial", False):
+        """Guard against a degenerate/missing <inertial> on a real moving body
+        (zero or non-positive-definite mass/inertia → singular/broken dynamics).
+        The root/base frame and dummy links are exempt (intentionally massless).
+        strict_inertial=True RAISES; lenient mode (the default) now WARNS instead
+        of silently zeroing (the silent path was a footgun — e.g. rizon4's
+        zero-inertia links produced broken dynamics with no signal)."""
+        strict = getattr(self, "strict_inertial", False)
+        bad = [link.get_name() for link in self.robot.get_links_ordered_by_id()
+               if link.get_name() != root_link_name and not link.is_dummy_link()
+               and (getattr(link, "missing_inertial", False) or link.has_degenerate_inertial())]
+        if not bad:
             return
-        for link in self.robot.get_links_ordered_by_id():
-            if link.get_name() == root_link_name or link.is_dummy_link():
-                continue
-            if getattr(link, "missing_inertial", False) or link.has_degenerate_inertial():
-                raise URDFParseError(
-                    f"Link '{link.get_name()}' has a degenerate/missing <inertial> "
-                    "(zero or non-positive-definite mass/inertia). This produces "
-                    "broken dynamics. Provide a valid <inertial>, or parse with "
-                    "strict_inertial=False to keep the legacy silent-zeroing."
-                )
+        msg = (f"Link(s) {bad} have a degenerate/missing <inertial> (zero or "
+               "non-positive-definite mass/inertia), which yields singular/broken "
+               "dynamics. Provide a valid <inertial>, or parse with "
+               "strict_inertial=True to reject this as an error.")
+        if strict:
+            raise URDFParseError(msg)
+        warnings.warn("URDFParser: " + msg, stacklevel=2)
 
     def resolve_mimic_targets(self):
         """Resolve each mimic joint's `mimic_joint_name` to its current jid.
