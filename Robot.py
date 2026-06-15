@@ -870,6 +870,21 @@ class Robot:
         # shipped inverse_dynamics_regressor's NB-wide parameter layout.
         return [link.get_inertia_params() for link in self.get_links_ordered_by_id(reverse)]
 
+    def get_origin_params_ordered_by_id(self, reverse = False):
+        # Per-joint 6-vector [x, y, z, roll, pitch, yaw] of raw URDF <origin>
+        # scalars in the frozen runtime_transform basis (see
+        # Joint.get_origin_params). Joint-indexed, mirrors get_Xmats_ordered_by_id
+        # — the on-device prologue rebuilds each joint's constant Xfixed from
+        # these 6 scalars once per launch (runtime_transform path).
+        return [joint.get_origin_params() for joint in self.get_joints_ordered_by_id(reverse)]
+
+    def get_runtime_transform_mats_ordered_by_id(self, reverse = False):
+        # Per-joint spatial X transform with the origin block carried as named
+        # xf_* symbols (see Joint.get_runtime_transform_matrix). Used by the
+        # runtime_transform codegen to bake the DENSE rpy sparsity and hoist the
+        # origin out of the hot sin/cos(q) loop into s_Xfixed scratch loads.
+        return [joint.get_runtime_transform_matrix() for joint in self.get_joints_ordered_by_id(reverse)]
+
     def get_Imats_dict_by_id(self):
         return {link.lid:link.get_spatial_inertia() for link in self.links}
 

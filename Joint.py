@@ -515,6 +515,69 @@ class Joint:
     def get_transformation_matrix(self):
         return self.Xmat_sp
 
+    # ------------------------------------------------------------------
+    # Runtime-mutable joint-frame transform (runtime_transform path).
+    # Mirrors Link.get_inertia_params / the runtime_inertia machinery: expose
+    # the RAW URDF <origin> scalars in a frozen basis so the on-device prologue
+    # can rebuild the constant 6x6 Xfixed = rot(E(rpy))*xlt(skew(xyz)) once per
+    # launch, and provide a symbolic-Xfixed transform whose origin coefficients
+    # are NAMED SYMBOLS (xf_*) instead of folded numeric literals -> the codegen
+    # bakes the general-rpy DENSE sparsity and hoists the origin out of the hot
+    # sin/cos(q) loop into s_Xfixed scratch loads. EE/homogeneous transforms are
+    # OUT OF SCOPE for v1 (they keep the baked inline literals).
+    # ------------------------------------------------------------------
+    # frozen origin basis: [x, y, z, roll, pitch, yaw]
+    ORIGIN_PARAM_NAMES = ["x", "y", "z", "roll", "pitch", "yaw"]
+    # the 27 structurally-nonzero cells of Xfixed live in the TL / BL / BR 3x3
+    # blocks (TR is identically zero for any rpy); symbol name -> (row,col).
+    @staticmethod
+    def _runtime_xfixed_symbol_cells():
+        cells = {}
+        for blk, (r0, c0) in (("TL", (0, 0)), ("BL", (3, 0)), ("BR", (3, 3))):
+            for i in range(3):
+                for j in range(3):
+                    cells["xf_" + blk + "_" + str(i) + "_" + str(j)] = (r0 + i, c0 + j)
+        return cells
+
+    def get_origin_params(self):
+        """Raw URDF <origin> scalars [x, y, z, roll, pitch, yaw] (the frozen
+        basis the runtime_transform table holds). Read VERBATIM from the parsed
+        Origin (post pi-snap) so the on-device rebuild reproduces the baked
+        Xfixed bit-for-bit until set_transform_params mutates the table. The
+        floating root joint owns no fixed origin offset of its own (its origin
+        is identity by construction), so it returns all-zeros."""
+        if self.origin is None or self.origin.translation is None or self.origin.rotation is None:
+            return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        t = self.origin.translation
+        r = self.origin.rotation
+        return [float(t.x), float(t.y), float(t.z),
+                float(r.r), float(r.p), float(r.y)]
+
+    def get_runtime_transform_matrix(self):
+        """Spatial X transform with the origin block carried as NAMED SYMBOLS.
+
+        Returns Xmat_sp_free(q) * Xfixed_symbolic where Xfixed_symbolic is the
+        6x6 origin transform with its 27 structurally-nonzero cells replaced by
+        the xf_* symbols (TR block = 0). Substituting the numeric Xfixed cells
+        reproduces self.Xmat_sp exactly (verified). Because the origin cells are
+        symbols (never zero), the product carries the GENERAL-rpy DENSE sparsity
+        regardless of this joint's actual rpy -> rpy can move freely at runtime.
+
+        Multi-DoF roots (floating/planar/spherical) carry their variable origin
+        differently and are OUT OF SCOPE for v1: return the normal baked Xmat_sp
+        (the prologue still writes their Xfixed table slot to identity, unused)."""
+        if self.jtype in ("floating", "planar", "spherical"):
+            return self.Xmat_sp
+        if self.Xmat_sp_free is None:
+            return self.Xmat_sp
+        xf = sp.zeros(6, 6)
+        for name, (row, col) in self._runtime_xfixed_symbol_cells().items():
+            xf[row, col] = sp.symbols(name)
+        X = self.Xmat_sp_free * xf
+        # match the noise-removal the baked path applies to Xmat_sp; nsimplify
+        # over the q-trig + xf symbols leaves the linear xf coefficients intact.
+        return sp.nsimplify(X, tolerance=1e-6, rational=True).evalf()
+
     def get_transformation_matrix_hom_function(self):
         cache = self.__dict__.setdefault('_lambdify_cache', {})
         if 'Xmat_hom' not in cache:
