@@ -53,7 +53,7 @@ def test_parser_reads_damping_and_friction():
 
 def test_friction_defaults_zero_when_absent():
     # iiwa14 declares damping but no friction -> friction parses to 0 (no crash).
-    iiwa = os.path.join(os.path.dirname(__file__), "..", "..", "robot_assets", "iiwa14.urdf")
+    iiwa = os.path.join(os.path.dirname(__file__), "fixtures", "iiwa14.urdf")
     robot = _parse(iiwa)
     assert robot.robot_has_joint_damping()
     assert not robot.robot_has_joint_friction()
@@ -148,6 +148,6 @@ def test_degenerate_inertial_strict_raises():
 def test_strict_mode_accepts_valid_robot():
     # A fully-specified robot (iiwa14) passes strict mode (root exempt, all
     # moving bodies have valid inertials).
-    iiwa = os.path.join(os.path.dirname(__file__), "..", "..", "robot_assets", "iiwa14.urdf")
+    iiwa = os.path.join(os.path.dirname(__file__), "fixtures", "iiwa14.urdf")
     robot = _parse(iiwa, strict_inertial=True)
     assert robot is not None

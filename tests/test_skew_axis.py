@@ -68,7 +68,7 @@ def test_cardinal_robot_unchanged():
     """A cardinal-axis robot still classifies as all-cardinal and exposes the
     signed-index fast path (the byte-identical Tier-A guarantee in code form)."""
     iiwa = os.path.join(
-        os.path.dirname(__file__), "..", "..", "robot_assets", "iiwa14.urdf")
+        os.path.dirname(__file__), "fixtures", "iiwa14.urdf")
     if not os.path.exists(iiwa):
         import pytest
         pytest.skip("iiwa14.urdf asset not present")
