@@ -16,6 +16,13 @@ class URDFParseError(Exception):
     """Base class for every error raised while parsing a URDF model."""
 
 
+class MimicResolutionError(URDFParseError, ValueError):
+    """Raised when a ``<mimic>`` relation cannot be resolved (unknown target
+    joint or a mimic cycle). Derives from ValueError too so pre-existing
+    ``except ValueError`` callers keep working, while the URDFParseError base
+    lets it propagate through ``parse()`` instead of degrading to None."""
+
+
 class UnsupportedJointTypeError(URDFParseError):
     """Raised when a URDF joint declares a type the parser cannot model.
 

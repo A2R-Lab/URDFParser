@@ -6,7 +6,7 @@ import warnings
 from .Robot import Robot
 from .Link import Link
 from .Joint import Joint, Fixed_Joint
-from .errors import URDFParseError
+from .errors import MimicResolutionError, URDFParseError
 
 class URDFParser:
     def __init__(self):
@@ -232,25 +232,47 @@ class URDFParser:
             # store
             self.robot.add_joint(copy.deepcopy(curr_joint))
 
-    def _cardinal_normal_index(self, axis):
-        """Return the index (0/1/2) of a cardinal plane-normal <axis> (default
-        +Z). Skew planar normals are not decomposed (would need non-cardinal
-        in-plane axes); the parser rejects them rather than emit wrong dynamics."""
+    def _planar_plane_basis(self, axis):
+        """Return the ordered in-plane/normal axes [(a), (b), (n)] for a planar
+        joint's plane-normal <axis> (default +Z).
+
+        Cardinal normal (±X/±Y/±Z): BYTE-IDENTICAL to the historical emit —
+        in-plane axes are the two other cardinal units in ascending index
+        order and the rotation axis is the POSITIVE cardinal unit (the
+        historical convention, sign of the normal ignored).
+
+        Skew normal: the basis comes from the MINIMAL rotation R taking +Z to
+        the unit normal n (Rodrigues form of Quaternion::FromTwoVectors):
+        a = R@ex, b = R@ey, rotation about n. This is the natural
+        generalization of the +Z case (identical basis when n == +Z); each
+        sub-joint is a Tier-B skew-axis prismatic/continuous, which the whole
+        stack already supports. NOTE pinocchio's URDF loader silently IGNORES
+        a planar <axis> (always XY-plane), so there is no upstream convention
+        to match — ours is documented here and pinned by the equivalence test
+        against a programmatic unaligned-composite pinocchio model."""
         a = np.asarray(axis, dtype=np.float64)
         nrm = np.linalg.norm(a)
         if nrm == 0.0:
             raise URDFParseError("Planar joint has a zero-length plane-normal <axis>.")
-        a = a / nrm
+        n = a / nrm
         for index in range(3):
-            if np.isclose(abs(a[index]), 1.0) and all(
-                np.isclose(a[k], 0.0) for k in range(3) if k != index
+            if np.isclose(abs(n[index]), 1.0) and all(
+                np.isclose(n[k], 0.0) for k in range(3) if k != index
             ):
-                return index
-        raise URDFParseError(
-            "Planar joint with a non-cardinal plane-normal axis "
-            f"{list(axis)} is not supported by parse-time decomposition "
-            "(only cardinal normals X/Y/Z)."
-        )
+                in_plane = [k for k in range(3) if k != index]
+                return [
+                    self._make_cardinal_unit(in_plane[0]),
+                    self._make_cardinal_unit(in_plane[1]),
+                    self._make_cardinal_unit(index),
+                ]
+        # Minimal rotation from +Z to n: R = I + [v]x + [v]x^2 / (1 + c) with
+        # v = z x n, c = z . n. c > -1 here (n == -Z is cardinal, handled above).
+        z = np.array([0.0, 0.0, 1.0])
+        v = np.cross(z, n)
+        c = float(np.dot(z, n))
+        vx = np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+        R = np.eye(3) + vx + vx @ vx / (1.0 + c)
+        return [R[:, 0].tolist(), R[:, 1].tolist(), n.tolist()]
 
     def _make_cardinal_unit(self, index):
         v = [0.0, 0.0, 0.0]
@@ -303,17 +325,16 @@ class URDFParser:
         if jtype == "planar":
             raw_axis = raw_joint.find("axis")
             normal = self.to_float(raw_axis["xyz"]) if raw_axis is not None else [0.0, 0.0, 1.0]
-            n_index = self._cardinal_normal_index(normal)
-            in_plane = [k for k in range(3) if k != n_index]
+            axis_a, axis_b, axis_n = self._planar_plane_basis(normal)
             steps = [
-                ("prismatic", self._make_cardinal_unit(in_plane[0])),
-                ("prismatic", self._make_cardinal_unit(in_plane[1])),
+                ("prismatic", axis_a),
+                ("prismatic", axis_b),
                 # CONTINUOUS (not revolute): a URDF planar joint imposes NO limit
                 # on the in-plane rotation -- continuous is handled identically to
                 # revolute in the dynamics, but is correctly treated as unbounded
                 # (no joint-limit table entry). Using `revolute` here would emit an
                 # infinite limit literal.
-                ("continuous", self._make_cardinal_unit(n_index)),
+                ("continuous", axis_n),
             ]
         else:  # translation / cartesian: pure 3-DOF translation
             steps = [
@@ -566,31 +587,64 @@ class URDFParser:
         joint that isn't part of the parsed model — silently dropping such
         a relation produces wrong dynamics derivatives downstream (the bug
         this support closes).
+
+        Chained mimics (a mimic whose target is itself a mimic) are FLATTENED
+        here so every consumer sees a one-hop table: q_c = m_c*(m_b*q_a + o_b)
+        + o_c composes to target=a, multiplier=m_c*m_b, offset=m_c*o_b + o_c,
+        applied transitively to any depth. Each chain is walked over a
+        SNAPSHOT of the raw URDF relations (never the partially-flattened
+        state, which would double-count hops). A chain ending at a
+        mimic-of-fixed degenerates to the same constant the one-hop case does
+        (target_id=-1 with the constant folded into `mimic_offset`). Mimic
+        cycles raise MimicResolutionError.
         """
-        for joint in self.robot.get_joints_ordered_by_id():
-            if not getattr(joint, "is_mimic", False):
-                continue
-            target_name = joint.get_mimic_joint_name()
+        mimic_joints = [
+            j for j in self.robot.get_joints_ordered_by_id()
+            if getattr(j, "is_mimic", False)
+        ]
+        # Raw one-hop relations as written in the URDF, keyed by joint name.
+        raw = {
+            j.get_name(): (
+                j.get_mimic_joint_name(),
+                j.get_mimic_multiplier(),
+                j.get_mimic_offset(),
+            )
+            for j in mimic_joints
+        }
+        for joint in mimic_joints:
+            target_name, multiplier, offset = raw[joint.get_name()]
+            visited = {joint.get_name()}
+            while target_name in raw:
+                if target_name in visited:
+                    raise MimicResolutionError(
+                        f"Joint '{joint.get_name()}' is part of a mimic cycle "
+                        f"through '{target_name}'."
+                    )
+                visited.add(target_name)
+                # Fold this hop and keep walking: q = m*(m_t*q_t + o_t) + o.
+                next_name, hop_mult, hop_off = raw[target_name]
+                offset = multiplier * hop_off + offset
+                multiplier = multiplier * hop_mult
+                target_name = next_name
             target = self.robot.get_joint_by_name(target_name)
             if target is None:
-                # Allow mimic of a fixed joint: that's effectively a constant
-                # coordinate, which means this mimic joint also degenerates
-                # to a constant offset relative to its parent. Resolve by
-                # leaving mimic_target_id as -1 and dof=0 (already the case).
+                # Mimic (chain) of a fixed joint: a constant coordinate, so
+                # this joint degenerates to a constant too. The accumulated
+                # offset IS that constant (q_fixed contributes 0); keep it in
+                # mimic_offset and leave mimic_target_id as -1, dof=0.
                 if self.robot.get_fixed_joint_by_name(target_name) is not None:
                     joint.mimic_target_id = -1
+                    joint.mimic_multiplier = multiplier
+                    joint.mimic_offset = offset
                     continue
-                raise ValueError(
+                raise MimicResolutionError(
                     f"Joint '{joint.get_name()}' mimics unknown joint "
                     f"'{target_name}'. Available joints: "
                     f"{[j.get_name() for j in self.robot.get_joints_ordered_by_id()]}"
                 )
-            if getattr(target, "is_mimic", False):
-                raise ValueError(
-                    f"Joint '{joint.get_name()}' mimics '{target_name}', which is "
-                    "itself a mimic joint. Chained mimics are not supported."
-                )
             joint.mimic_target_id = target.get_id()
+            joint.mimic_multiplier = multiplier
+            joint.mimic_offset = offset
 
     def print_joint_order(self):
         print("------------------------------------------")
