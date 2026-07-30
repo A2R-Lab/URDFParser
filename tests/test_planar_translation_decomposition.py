@@ -211,3 +211,96 @@ def test_all_subjoints_cardinal():
         assert robot.robot_has_skew_axis() is False
         for jid in range(robot.get_num_joints()):
             assert robot.S_is_cardinal_by_id(jid), (path, jid)
+
+
+# ---- skew (non-cardinal) plane normal ------------------------------------
+# The parser decomposes a skew-normal planar joint with the minimal-rotation
+# basis (R = FromTwoVectors(+Z, n): a = R@ex, b = R@ey, rotation about n).
+# pinocchio's URDF loader silently IGNORES a planar <axis> (always XY-plane),
+# so the oracle is built PROGRAMMATICALLY from unaligned 1-DOF joints using
+# the axes the parser actually emitted. Fixture shares link inertials/origins
+# with planar_arm.urdf (the _LINK/_ORIGIN/_ELBOW constants above).
+
+_SKEW_NORMAL = [0.36, 0.48, 0.8]   # unit by construction; matches the fixture
+SKEW_PLANAR = os.path.join(FIXDIR, "skew_planar_arm.urdf")
+
+
+def _emitted_planar_axes(robot):
+    """The three sub-joint axes as the parser emitted them (from S columns)."""
+    axes = []
+    for sname in ("planar_joint__sub0", "planar_joint__sub1", "planar_joint__sub2"):
+        S = np.asarray(robot.get_S_by_id(robot.get_joint_by_name(sname).get_id()),
+                       dtype=np.float64).reshape(6)
+        axes.append(S[3:] if np.linalg.norm(S[3:]) > 0 else S[:3])
+    return axes
+
+
+def test_skew_planar_basis_is_orthonormal_right_handed():
+    robot = _parse(SKEW_PLANAR)
+    assert robot is not None
+    a, b, n = _emitted_planar_axes(robot)
+    np.testing.assert_allclose(np.dot(a, b), 0.0, atol=1e-12)
+    np.testing.assert_allclose(np.dot(a, n), 0.0, atol=1e-12)
+    np.testing.assert_allclose(np.dot(b, n), 0.0, atol=1e-12)
+    np.testing.assert_allclose(np.cross(a, b), n, atol=1e-12)
+    np.testing.assert_allclose(n, np.asarray(_SKEW_NORMAL), atol=1e-12)
+    # the whole robot now routes Tier B
+    assert robot.robot_has_skew_axis() is True
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_skew_planar_decomposition_matches_programmatic_pinocchio(seed):
+    """Decomposed skew-normal planar chain vs a pinocchio model built from the
+    SAME unaligned axes (prismatic a -> prismatic b -> revolute n through
+    massless frames). Same stacked coordinates on both sides -> exact match."""
+    rng = np.random.default_rng(seed)
+    robot = _parse(SKEW_PLANAR)
+    ref = RBDReference(robot)
+    a, b, n = (np.asarray(v) for v in _emitted_planar_axes(robot))
+
+    model = pin.Model()
+    zeroI = pin.Inertia(0.0, np.zeros(3), np.zeros((3, 3)))
+    ja = model.addJoint(0, pin.JointModelPrismaticUnaligned(a),
+                        pin.SE3(np.eye(3), np.array(_ORIGIN)), "ja")
+    model.appendBodyToJoint(ja, zeroI, pin.SE3.Identity())
+    jb = model.addJoint(ja, pin.JointModelPrismaticUnaligned(b),
+                        pin.SE3.Identity(), "jb")
+    model.appendBodyToJoint(jb, zeroI, pin.SE3.Identity())
+    jn = model.addJoint(jb, pin.JointModelRevoluteUnaligned(n),
+                        pin.SE3.Identity(), "jn")
+    model.appendBodyToJoint(jn, _inertia(_LINK1), pin.SE3.Identity())
+    je = model.addJoint(jn, pin.JointModelRY(),
+                        pin.SE3(np.eye(3), np.array(_ELBOW)), "je")
+    model.appendBodyToJoint(je, _inertia(_LINK2), pin.SE3.Identity())
+    data = model.createData()
+
+    q = rng.uniform(-0.5, 0.5, 4)
+    qd = rng.uniform(-1.0, 1.0, 4)
+    qdd = rng.uniform(-1.0, 1.0, 4)
+
+    tau_ref = ref.inverse_dynamics(q, qd, qdd)[0]
+    tau_pin = pin.rnea(model, data, q, qd, qdd)
+    np.testing.assert_allclose(tau_ref, tau_pin, atol=1e-9, rtol=1e-9)
+
+    M_ref = ref.crba(q)
+    M_pin = pin.crba(model, data, q)
+    M_pin = np.triu(M_pin) + np.triu(M_pin, 1).T
+    np.testing.assert_allclose(M_ref, M_pin, atol=1e-9, rtol=1e-9)
+
+    qdd_ref = ref.forward_dynamics(q, qd, tau_pin)
+    qdd_pin = pin.aba(model, data, q, qd, tau_pin)
+    np.testing.assert_allclose(qdd_ref, qdd_pin, atol=1e-8, rtol=1e-8)
+
+
+def test_skew_planar_self_consistent():
+    """forward_dynamics inverts inverse_dynamics through the skew dummy chain."""
+    rng = np.random.default_rng(7)
+    robot = _parse(SKEW_PLANAR)
+    ref = RBDReference(robot)
+    for _ in range(5):
+        q = rng.uniform(-0.5, 0.5, 4)
+        qd = rng.uniform(-1.0, 1.0, 4)
+        qdd = rng.uniform(-1.0, 1.0, 4)
+        tau = ref.inverse_dynamics(q, qd, qdd)[0]
+        np.testing.assert_allclose(ref.forward_dynamics(q, qd, tau), qdd,
+                                   atol=1e-9, rtol=1e-9)
