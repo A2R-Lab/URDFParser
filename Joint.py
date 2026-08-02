@@ -493,7 +493,26 @@ class Joint:
             # and derivative
             self._build_homogeneous_transform_derivatives()
         else:
-            self.Xmat_sp_hom = self.Xmat_sp_hom_free * self.origin.Xmat_sp_hom_fixed
+            # Forward hom composition: child->parent pose = X_origin_fwd @ X_free_fwd
+            # (URDF/pinocchio convention M_placement * exp(q): the joint's variable
+            # motion happens in the JOINT frame, AFTER the fixed origin offset).
+            # The previous `hom_free * origin` order placed the variable rotation
+            # BEFORE the origin offset — i.e. a mid-chain spherical joint rotated
+            # about its PARENT's origin instead of its own anchor, so the EE world
+            # position diverged from pinocchio whenever the spherical joint's
+            # <origin xyz> was nonzero (rotation blocks agreed; only translations
+            # differed). The spatial Xmat_sp (= X_free * X_origin, Featherstone
+            # parent->child) was always correct, which is why the DYNAMICS suite
+            # matched pinocchio while the hom-consuming EE kinematics did not.
+            # Note origin.Xmat_sp_hom_fixed holds the TRANSPOSED (frame) rotation
+            # E with a forward translation (a mixed object consumed by the
+            # single-DOF path above), so build the true forward origin hom here.
+            origin_hom_fwd = sp.eye(4)
+            origin_hom_fwd[:3, :3] = self.origin.rotation.E.transpose()
+            origin_hom_fwd[0, 3] = self.origin.translation.x
+            origin_hom_fwd[1, 3] = self.origin.translation.y
+            origin_hom_fwd[2, 3] = self.origin.translation.z
+            self.Xmat_sp_hom = origin_hom_fwd * self.Xmat_sp_hom_free
             self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
             self._build_homogeneous_transform_derivatives()
 
