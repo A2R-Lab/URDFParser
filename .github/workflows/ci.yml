@@ -1,9 +1,14 @@
 name: CI
 
 # CPU-only unit tests for the parser. tests/conftest.py puts the package's
-# parent directory on sys.path itself, so the default checkout location
-# (…/work/URDFParser/URDFParser) already satisfies the `import URDFParser`
-# absolute imports — no install step beyond the runtime requirements.
+# parent directory on sys.path itself, so a checkout named `URDFParser` with
+# its parent as the working directory satisfies the `import URDFParser`
+# absolute imports. The sibling `RBDReference` package (not on PyPI) plus the
+# `pin` (Pinocchio) wheel are needed by the dynamics-facing tests
+# (test_planar_translation_decomposition validates the parse-time
+# decomposition against Pinocchio's native planar/translation joints), so
+# both are provided rather than skipped — mirroring how RBDReference's own CI
+# checks out URDFParser next to itself.
 
 on:
   push:
@@ -17,13 +22,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: URDFParser
+
+      - uses: actions/checkout@v4
+        with:
+          repository: A2R-Lab/RBDReference
+          path: RBDReference
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        run: |
+          pip install -r URDFParser/requirements.txt
+          pip install -r RBDReference/requirements.txt
+          pip install pin pytest
 
       - name: Run tests
-        run: python -m pytest tests -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest URDFParser/tests -q
