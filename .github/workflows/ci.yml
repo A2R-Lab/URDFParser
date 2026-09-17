@@ -1,0 +1,29 @@
+name: CI
+
+# CPU-only unit tests for the parser. tests/conftest.py puts the package's
+# parent directory on sys.path itself, so the default checkout location
+# (…/work/URDFParser/URDFParser) already satisfies the `import URDFParser`
+# absolute imports — no install step beyond the runtime requirements.
+
+on:
+  push:
+    branches: [main, modernizing-tests]
+  pull_request:
+    branches: [main, modernizing-tests]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests -q
