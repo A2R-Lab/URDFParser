@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: A2R-Lab/RBDReference
+          # RBDReference's live branch is main; pin it explicitly so a future
+          # default-branch change can't silently swap the sibling out.
+          ref: main
           path: RBDReference
 
       - uses: actions/setup-python@v5
@@ -35,10 +38,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        # requirements-dev carries the LOAD-BEARING pinocchio pins (pin<4 +
+        # cmeel-eigen + cmeel-urdfdom<5 — see the file's comments); an unpinned
+        # `pip install pin` resolves pin 4.x, `import pinocchio` breaks, and
+        # the importorskip-guarded Pinocchio tests silently skip (false green).
         run: |
-          pip install -r URDFParser/requirements.txt
+          pip install -r URDFParser/requirements-dev.txt
           pip install -r RBDReference/requirements.txt
-          pip install pin pytest
 
       - name: Run tests
         env:

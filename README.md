@@ -60,10 +60,42 @@ The convention is `pitch` in **meters / radian** (translation = `pitch · angle`
 matching Pinocchio's `JointModelHelical`. Closed kinematic loops are unsupported.
 
 ## Installation Instructions:
-There are 4 required packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
+There are 4 required runtime packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
 ```shell
 pip3 install -r requirements.txt
 ```
+(`lxml` is never imported directly — it is the backend `BeautifulSoup(..., "xml")`
+uses, so it is a real runtime dependency.)
+
+## Running the tests (standalone):
+The `tests/` suite runs standalone with the dev requirements:
+```shell
+pip3 install -r requirements-dev.txt
+python3 -m pytest tests -q
+```
+`tests/conftest.py` puts the package's parent on `sys.path`, so the checkout
+directory must be named exactly `URDFParser`. The dynamics-facing tests
+additionally validate against Pinocchio and the sibling **RBDReference**
+package: check it out NEXT TO this repo (directory named exactly
+`RBDReference`, common parent on `sys.path`). The `pin<4` / `cmeel-eigen` /
+`cmeel-urdfdom<5` pins in `requirements-dev.txt` are load-bearing — see the
+comments there. CI (`.github/workflows/ci.yml`) runs exactly this shape.
+
+## Parse options and errors:
+* `URDFParser().parse(path, floating_base=..., strict_inertial=...)` —
+  `strict_inertial=True` rejects degenerate/missing `<inertial>` blocks as a
+  `URDFParseError` instead of warning (the lenient default keeps parsing and
+  warns; broken dynamics downstream are on you).
+* Typed exceptions live in `errors.py`: `URDFParseError`,
+  `UnsupportedJointTypeError`, `MimicResolutionError` (chained mimics are
+  flattened at resolve time; cycles raise).
+* Joint limits metadata: `get_joint_limits_by_id`, `get_velocity_limit_by_id`,
+  `get_effort_limit_by_id` (Robot API), from the URDF `<limit>` tags.
+* Spherical helpers: `joint_is_spherical(jid)`, `robot_has_spherical()`.
+  A spherical joint is a second source of `NQ != NV` (quaternion position,
+  3-wide tangent) in addition to the floating base.
+* `get_origin_params_ordered_by_id()` exposes the per-joint
+  `[x,y,z,r,p,y]` origin table (runtime-transform workflows downstream).
 
 ## Robot API:
 
