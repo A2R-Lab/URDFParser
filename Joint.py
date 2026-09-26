@@ -6,6 +6,17 @@ from .SpatialAlgebra import Origin, Translation, Rotation, Quaternion_Tools
 from .errors import UnsupportedJointTypeError, URDFParseError
 
 
+def _simplify_transform(matrix):
+    """Simplify symbolic coefficients without truncating rigid transforms.
+
+    The former 1e-6 rational tolerance perturbed G1 shoulder rotations by
+    ~2e-8 and destroyed orthogonality. That error survives fp64 arithmetic
+    and is amplified by inverse-mass/Hessian composition. Quarter-turn URDF
+    angle cleanup belongs in _snap_to_pi_grid, not in matrix coefficients.
+    """
+    return sp.nsimplify(matrix, tolerance=1e-15, rational=True).evalf()
+
+
 def _snap_to_pi_grid(value, tolerance=1e-5):
     """Snap a URDF rpy value to N*π/2 (|N| ≤ 4) when within `tolerance`.
 
@@ -124,7 +135,7 @@ class Joint:
         self.Xmat_sp = matrix_in
 
     def set_transformation_matrix_hom(self, matrix_in):
-        self.Xmat_sp_hom = sp.nsimplify(matrix_in, tolerance=1e-6, rational=True).evalf()
+        self.Xmat_sp_hom = _simplify_transform(matrix_in)
         self.position_symbols = [self.theta]
         self.local_q_dim = 1
         self._build_homogeneous_transform_derivatives()
@@ -470,8 +481,9 @@ class Joint:
             # see docs/open-tasks/notes.md (Joint.py:260)
             raise UnsupportedJointTypeError(jtype, joint_name=self.name)
         self.Xmat_sp = self.Xmat_sp_free * self.origin.Xmat_sp_fixed
-        # remove numerical noise (e.g., URDF's often specify angles as 3.14 or 3.14159 but that isn't exactly PI)
-        self.Xmat_sp = sp.nsimplify(self.Xmat_sp, tolerance=1e-6, rational=True).evalf()
+        # Preserve rotation orthogonality and translation precision. RPY
+        # quarter-turn cleanup was already handled by set_origin_rpy.
+        self.Xmat_sp = _simplify_transform(self.Xmat_sp)
         # Multi-DOF non-root joints (planar, spherical) carry their variable
         # translation/rotation directly in Xmat_sp_hom_free (like floating),
         # so they use the floating-style direct hom composition rather than the
@@ -489,7 +501,7 @@ class Joint:
             self.Xmat_sp_hom[:3,:3] = (self.Xmat_sp_hom_free[:3,:3] * self.origin.Xmat_sp_hom_fixed[:3,:3]).transpose()
             self.Xmat_sp_hom[:3,3] = (self.origin.Xmat_sp_hom_fixed[:3,:3] * self.Xmat_sp_hom_free[:3,3]
                                       + self.origin.Xmat_sp_hom_fixed[:3,3])
-            self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
+            self.Xmat_sp_hom = _simplify_transform(self.Xmat_sp_hom)
             # and derivative
             self._build_homogeneous_transform_derivatives()
         else:
@@ -513,7 +525,7 @@ class Joint:
             origin_hom_fwd[1, 3] = self.origin.translation.y
             origin_hom_fwd[2, 3] = self.origin.translation.z
             self.Xmat_sp_hom = origin_hom_fwd * self.Xmat_sp_hom_free
-            self.Xmat_sp_hom = sp.nsimplify(self.Xmat_sp_hom, tolerance=1e-6, rational=True).evalf()
+            self.Xmat_sp_hom = _simplify_transform(self.Xmat_sp_hom)
             self._build_homogeneous_transform_derivatives()
 
     def get_transformation_matrix_function(self):
@@ -595,7 +607,7 @@ class Joint:
         X = self.Xmat_sp_free * xf
         # match the noise-removal the baked path applies to Xmat_sp; nsimplify
         # over the q-trig + xf symbols leaves the linear xf coefficients intact.
-        return sp.nsimplify(X, tolerance=1e-6, rational=True).evalf()
+        return _simplify_transform(X)
 
     def get_transformation_matrix_hom_function(self):
         cache = self.__dict__.setdefault('_lambdify_cache', {})
