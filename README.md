@@ -134,8 +134,9 @@ The main API is as follows where **XXX** can be replaced by:
 # A single object by its ID or by its name as defined in the URDF
 get_XXX_by_id(lid) # jid for joints 
 get_XXX_by_name(name)
-# A list of the objects that occur in the given bfs level
-get_XXX_by_bfs_level(name)
+# A list of objects at a numeric BFS level (plural family name)
+get_XXXs_by_bfs_level(level)  # joint/link/Xmat/Xmat_Func/Imat families
+get_S_by_bfs_level(level)    # the motion-subspace family uses singular S
 # A list of the object ordered by their IDs or by their names as defined in the URDF
 # Note: The base link/inertia exists at index -1 and so will appear at the beginning of the list
 get_XXXs_ordered_by_id(reverse = False)
