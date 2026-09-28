@@ -1,9 +1,16 @@
 # URDFParser
 
-A simple parser library for URDF Files. That returns a ```robot``` object which can be used to access links, joints, transformation matrices, etc.
+A Python URDF parser for robot-specific dynamics and code generation. It returns
+a `Robot` with joint topology, spatial inertias, symbolic transforms, and explicit
+configuration/velocity indexing. Active development lives at
+[A2R-Lab/URDFParser](https://github.com/A2R-Lab/URDFParser); the
+[robot-acceleration repository](https://github.com/robot-acceleration/URDFParser)
+is the archival implementation associated with the original GRiD work.
 
 ## Usage:
 ```python
+from URDFParser import URDFParser
+
 parser = URDFParser()
 robot = parser.parse(urdf_filepath, floating_base = False, joint_ordering = "pinocchio_order")
 ```
@@ -38,11 +45,19 @@ into the Pinocchio-style convention so generated code and reference algorithms
 stay consistent under the hood.
 
 ## Supported joint types:
-Revolute, continuous, prismatic, fixed, **helical/screw**, planar, and spherical
+Revolute, continuous, prismatic, fixed, **helical/screw**, planar, translation
+(alias cartesian), and spherical
 joints are supported, as are **mimic** joints. An arbitrary/skew `<axis>` (a
 non-cardinal direction) is parsed into a dense 6-vector motion subspace `S`; such
-joints (and helical joints, whose `S` is intrinsically coupled) take the general
-Tier-B code path, while cardinal-axis robots stay byte-identical.
+joints (and helical joints, whose `S` is intrinsically coupled) need downstream
+algorithms that support dense motion subspaces. Parser support does not by itself
+guarantee support in every GRiD kernel.
+
+Fixed joints are merged into their parent, including transformed inertias.
+Planar and translation joints expand into chains of scalar joints with synthetic
+links. Mimic joints retain their bodies but share an independent driver's state
+coordinates. Joint IDs therefore need not equal position or velocity indices.
+Use `get_joint_index_q(jid)` and `get_joint_index_v(jid)` for indexing.
 
 **Helical / screw joints** (`<joint type="helical">` or `type="screw"`) are a
 1-DOF (NQ=NV=1) extension: a single coordinate `θ` drives coupled rotation about
@@ -60,6 +75,10 @@ The convention is `pitch` in **meters / radian** (translation = `pitch · angle`
 matching Pinocchio's `JointModelHelical`. Closed kinematic loops are unsupported.
 
 ## Installation Instructions:
+Keep the checkout named `URDFParser`, with its parent on Python's import path
+(for example, run Python from that parent directory). This repository is a
+source package, not a `pip install .` distribution. From the checkout:
+
 There are 4 required runtime packages ```beautifulsoup4, lxml, numpy, sympy``` which can be automatically installed by running:
 ```shell
 pip3 install -r requirements.txt
@@ -83,9 +102,13 @@ comments there. CI (`.github/workflows/ci.yml`) runs exactly this shape.
 
 ## Parse options and errors:
 * `URDFParser().parse(path, floating_base=..., strict_inertial=...)` —
-  `strict_inertial=True` rejects degenerate/missing `<inertial>` blocks as a
-  `URDFParseError` instead of warning (the lenient default keeps parsing and
-  warns; broken dynamics downstream are on you).
+  `strict_inertial=True` rejects degenerate/missing inertials on moving bodies
+  as `URDFParseError`; root/base and synthetic dummy links are exempt. The
+  lenient default permits missing inertials and warns. Use strict mode when
+  preparing dynamics inputs.
+* Parse failures raise `URDFParseError`, including missing files, malformed
+  model fields, and invalid options. They no longer silently return `None`.
+  Wrapped failures preserve the original exception as `__cause__`.
 * Typed exceptions live in `errors.py`: `URDFParseError`,
   `UnsupportedJointTypeError`, `MimicResolutionError` (chained mimics are
   flattened at resolve time; cycles raise).
@@ -102,10 +125,10 @@ comments there. CI (`.github/workflows/ci.yml`) runs exactly this shape.
 The main API is as follows where **XXX** can be replaced by:
 + **joint**: a joint object (see API below)
 + **link**: a link object (see API below)
-+ **Xmat**: a sympy transformation matrix with one free variable as defined by its joint (also 4x4 homogenous version and its first and second derivatives -- e.g., d2Xmat_hom)
-+ **Xmat_Func**: a function that returns a numpy matrix when passed a value for the free variable (again also 4x4 homogenous version and its first and second derivatives -- e.g., d2Xmat_hom_Func)
++ **Xmat**: a symbolic spatial transform; scalar joints have one coordinate, while quaternion joints use coordinate blocks (also 4x4 homogeneous variants and derivatives)
++ **Xmat_Func**: a callable numerical transform; use the joint's coordinate block rather than assuming every joint takes a scalar
 + **Imat**: a numpy 6x6 inertia matrix
-+ **S**: a numpy 6x1 motion subspace matrix
++ **S**: a motion subspace (6-vector for a scalar joint, 6-by-DoF for a multi-DoF joint), with spatial rows ordered angular then linear
 
 ```python
 # A single object by its ID or by its name as defined in the URDF
@@ -130,14 +153,16 @@ get_name()
 # get the robot type (if applicable)
 is_serial_chain()
 # get the number of positions and velocities in the robot state as well as numbers of links and joints
-# note: links should be joints + 1 when including the base, num_joints = num_pos
-#       num_vel = num_pos for fixed base (and is one larger with quaternion)
+# NQ = len(q); NV = len(qd) = len(qdd) = len(generalized_force).
+# With default quaternion coordinates, NQ = NV + one per free-flyer/spherical joint.
+# Fixed-base scalar-joint robots have NQ == NV; fixed-base spherical robots do not.
+# Joint/body counts are topology sizes, not state-vector widths.
 get_num_pos()
 get_num_vel()
-get_num_bodies() # assumes fixed world base frame included for fixed base robots
+get_num_bodies() # effective links, excluding the world/base sentinel
 get_num_joints()
 get_num_links()
-get_num_links_effective() # num_links - 1 (base link is not used in many RBD algorithms when fixed)
+get_num_links_effective() # num_links - 1; includes a floating physical base
 # get the max bfs_level
 get_max_bfs_level()
 # get the IDs at a given bfs level and the bfs level for a given id

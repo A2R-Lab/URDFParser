@@ -79,3 +79,35 @@ def test_valid_revolute_still_parses(tmp_path):
     assert robot is not None
     assert robot.get_num_vel() == 1
     assert robot.get_num_pos() == 1
+
+
+def test_missing_file_preserves_path_and_cause(tmp_path):
+    path = tmp_path / "missing.urdf"
+    with pytest.raises(URDFParseError, match="missing.urdf") as error:
+        URDFParser().parse(path)
+    assert isinstance(error.value.__cause__, FileNotFoundError)
+
+
+def test_missing_robot_element_raises(tmp_path):
+    path = tmp_path / "not_robot.urdf"
+    path.write_text("<configuration/>")
+    with pytest.raises(URDFParseError, match="no <robot>"):
+        URDFParser().parse(path)
+
+
+@pytest.mark.parametrize("option", [dict(joint_ordering="invalid"),
+                                  dict(floating_base_convention="invalid")])
+def test_invalid_parse_option_is_not_silently_swallowed(tmp_path, option):
+    path = _write_urdf(tmp_path, '<joint name="j1" type="revolute">'
+                       '<parent link="base"/><child link="l1"/><axis xyz="0 0 1"/>'
+                       '<limit lower="-1" upper="1" effort="1" velocity="1"/></joint>')
+    with pytest.raises(URDFParseError) as error:
+        URDFParser().parse(path, **option)
+    assert isinstance(error.value.__cause__, ValueError)
+
+
+def test_malformed_joint_preserves_cause(tmp_path):
+    path = _write_urdf(tmp_path, '<joint name="j1" type="revolute"/>')
+    with pytest.raises(URDFParseError, match="bot.urdf") as error:
+        URDFParser().parse(path)
+    assert error.value.__cause__ is not None

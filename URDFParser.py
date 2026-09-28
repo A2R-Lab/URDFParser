@@ -22,6 +22,14 @@ class URDFParser:
         floating_base_convention = "pinocchio",
         strict_inertial = False,
     ):
+        """Parse a tree-structured URDF into a Robot, or raise URDFParseError.
+
+        Fixed joints are merged and mimic coordinates are reduced. Query
+        get_num_pos()/get_num_vel() on the result instead of counting joints.
+        The default free-flyer uses xyzw quaternions and local linear/angular
+        velocities. strict_inertial validates moving-body inertias; root and
+        synthetic decomposition links are exempt.
+        """
         # strict_inertial defaults to False (lenient) to preserve every existing
         # flow: a missing/degenerate <inertial> is silently zeroed as today. When
         # True, a degenerate inertial on a real (non-root, non-dummy) link raises
@@ -30,8 +38,10 @@ class URDFParser:
         Joint.floating_base = floating_base
         try:
             # parse the file
-            urdf_file = open(filename, "r")
-            self.soup = BeautifulSoup(urdf_file.read(),"xml").find("robot")
+            with open(filename, "r") as urdf_file:
+                self.soup = BeautifulSoup(urdf_file.read(), "xml").find("robot")
+            if self.soup is None:
+                raise URDFParseError(f"URDF '{filename}' has no <robot> element")
             # set up the robot object
             self.robot = Robot(
                 self.soup["name"],
@@ -56,11 +66,10 @@ class URDFParser:
             # silently receiving None. This replaces the old print()+exit()
             # uncatchable SystemExit failure mode.
             raise
-        except Exception:
-            # Backwards-compatible catch-all: any other malformed-URDF failure
-            # still degrades to None (historical behavior). Valid URDFs are
-            # unaffected.
-            return None
+        except Exception as exc:
+            # Preserve the cause and input path instead of silently returning
+            # None for missing files, bad options, or malformed model fields.
+            raise URDFParseError(f"Failed to parse URDF '{filename}': {exc}") from exc
 
     def resolve_joint_ordering(self, alpha_tie_breaker, joint_ordering):
         if alpha_tie_breaker is not None:
