@@ -45,7 +45,22 @@ def _parse(name):
 
 
 def _pin_model(name):
-    return pin.buildModelFromUrdf(os.path.join(FIXTURES, name))
+    return _snapped_pin_model(os.path.join(FIXTURES, name))
+
+
+def _snapped_pin_model(path):
+    """pinocchio built from the URDF with every <origin rpy> snapped to the
+    quarter-turn grid the parser snaps joint origins to (Joint._snap_to_pi_grid,
+    tolerance 1e-5): a URDF that writes 3.14159 describes a robot 2.7e-6 rad
+    away from the one the parser models, and the oracle must model the parser's
+    robot. RBDReference's pinocchio backend snaps the same way."""
+    from bs4 import BeautifulSoup
+    from URDFParser.Joint import _snap_to_pi_grid
+    soup = BeautifulSoup(open(path).read(), "xml")
+    for origin in soup.find_all("origin"):
+        if origin.has_attr("rpy") and len(origin["rpy"].split()) == 3:
+            origin["rpy"] = " ".join(repr(float(_snap_to_pi_grid(float(v)))) for v in origin["rpy"].split())
+    return pin.buildModelFromXML(str(soup))
 
 
 def _pin_joint_of_body(model, link_name):
@@ -117,8 +132,11 @@ def test_joint_placements_match_pinocchio_at_random_configurations(name):
         for k, joint in enumerate(joints):
             if model.existJointName(joint.name):
                 jm = model.joints[model.getJointId(joint.name)]
-                assert jm.nq == 1, f"{name} {joint.name}: pinocchio nq {jm.nq}"
-                q_pin[jm.idx_q] = q[k]
+                if jm.nq == 1:
+                    q_pin[jm.idx_q] = q[k]
+                else:   # a continuous joint: pinocchio's unbounded revolute is (cos, sin)
+                    assert jm.nq == 2 and joint.jtype == "continuous", f"{name} {joint.name}: pinocchio nq {jm.nq}"
+                    q_pin[jm.idx_q:jm.idx_q + 2] = [np.cos(q[k]), np.sin(q[k])]
                 continue
             pending.append(q[k])
             link = robot.get_link_by_name(joint.child)
