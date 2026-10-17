@@ -57,13 +57,27 @@ class Link:
         # I6x6 = I3x3 + mccT   mc    I3x3 = Ixx   Ixy   Ixz    c =   0 -cz  cy
         #         mcT          mI           Ixy   Iyy   Iyz         cz   0 -cx
         #                                   Ixz   Iyz   Izz        -cy  cx  0
+        # The URDF <inertia> tensor is written in the <inertial><origin> frame.
+        # URDF's rpy gives R = Rz(y) Ry(p) Rx(r), the rotation taking inertial-
+        # frame coordinates to link-frame coordinates; Rotation.E is Featherstone's
+        # E = R^T, so the tensor about the centre of mass in LINK axes is
+        # E^T I E, and only then does the parallel-axis term move it to the
+        # link origin. Pinocchio applies the same rotation; a tensor given with a
+        # rotated inertial origin (UR5e shoulder and wrists, rpy = +-pi/2 about x)
+        # was previously taken unrotated and came out up to 10 % wrong.
         rx = sp.nsimplify(self.origin.translation.rx, tolerance=1e-12, rational=True)
         com_trans = np.reshape(np.array([expr.evalf() for expr in rx]),(3,3))
         
         mc = self.mass*com_trans
         mccT = np.matmul(mc,com_trans.transpose())
         
-        topLeft = self.inertia.to_matrix() + mccT
+        I_inertial = np.asarray(self.inertia.to_matrix(), dtype=float)
+        if self.origin.rotation is not None:
+            E = np.asarray(self.origin.rotation.E.evalf(), dtype=float)
+            I_link = E.transpose() @ I_inertial @ E
+        else:
+            I_link = I_inertial
+        topLeft = I_link + mccT
         top = np.hstack((topLeft,mc))
         bottom = np.hstack((mc.transpose(),self.mass*np.eye(3)))
         self.spatial_ineratia = np.vstack((top,bottom)).astype(float)

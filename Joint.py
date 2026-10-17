@@ -499,7 +499,13 @@ class Joint:
             # prismatic Y translation into -Y in the parent frame).
             self.Xmat_sp_hom = sp.eye(4)
             self.Xmat_sp_hom[:3,:3] = (self.Xmat_sp_hom_free[:3,:3] * self.origin.Xmat_sp_hom_fixed[:3,:3]).transpose()
-            self.Xmat_sp_hom[:3,3] = (self.origin.Xmat_sp_hom_fixed[:3,:3] * self.Xmat_sp_hom_free[:3,3]
+            # origin.Xmat_sp_hom_fixed[:3,:3] is Featherstone's E = R^T, so the
+            # joint-frame translation reaches the parent frame through E^T = R.
+            # With E itself the translation of a prismatic joint whose origin
+            # is rotated came out mirrored (2026-10-16 oracle: a yaw of 0.7
+            # flipped the y offset; fr3_finger_joint2's yaw of pi hid it, since
+            # that R is its own transpose).
+            self.Xmat_sp_hom[:3,3] = (self.origin.Xmat_sp_hom_fixed[:3,:3].transpose() * self.Xmat_sp_hom_free[:3,3]
                                       + self.origin.Xmat_sp_hom_fixed[:3,3])
             self.Xmat_sp_hom = _simplify_transform(self.Xmat_sp_hom)
             # and derivative
