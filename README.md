@@ -21,28 +21,10 @@ joint_ordering="urdf_order"        # DFS preserving raw URDF sibling order
 joint_ordering="alphabetical_order" # DFS sorting sibling joints by joint name
 ```
 
-The legacy `alpha_tie_breaker` argument is still accepted for backward compatibility:
-```python
-alpha_tie_breaker=False # equivalent to joint_ordering="urdf_order"
-alpha_tie_breaker=True  # equivalent to joint_ordering="alphabetical_order"
-```
 
-Floating-base parsing also accepts a public input convention flag:
-```python
-robot = parser.parse(
-    urdf_filepath,
-    floating_base=True,
-    floating_base_convention="pinocchio",
-)
-```
-Supported values are:
-```python
-floating_base_convention="pinocchio"  # default: q = [x, y, z, qx, qy, qz, qw], v = [vx, vy, vz, wx, wy, wz]
-floating_base_convention="legacy"     # legacy public input/output order: q = [x, y, z, qw, qx, qy, qz], v = [wx, wy, wz, vx, vy, vz]
-```
-Internally the parser and downstream dynamics code normalize floating-base states
-into the Pinocchio-style convention so generated code and reference algorithms
-stay consistent under the hood.
+Floating-base parsing uses pinocchio's layout: `q = [x, y, z, qx, qy, qz, qw, joints]`
+and `v = [vx, vy, vz, wx, wy, wz, joints]`; the parser, RBDReference and the generated
+code share it, so there is no convention flag.
 
 ## Supported joint types:
 Revolute, continuous, prismatic, fixed, **helical/screw**, planar, translation

@@ -17,9 +17,7 @@ class URDFParser:
         filename,
         floating_base = False,
         using_quaternion = True,
-        alpha_tie_breaker = None,
         joint_ordering = "pinocchio_order",
-        floating_base_convention = "pinocchio",
         strict_inertial = False,
     ):
         """Parse a tree-structured URDF into a Robot, or raise URDFParseError.
@@ -47,14 +45,13 @@ class URDFParser:
                 self.soup["name"],
                 floating_base,
                 using_quaternion,
-                floating_base_convention=floating_base_convention,
             )
             # collect links
             self.parse_links()
             # collect joints
             self.parse_joints()
             # remove all fixed joints, renumber links and joints, and build parent and subtree lists
-            resolved_joint_ordering = self.resolve_joint_ordering(alpha_tie_breaker, joint_ordering)
+            resolved_joint_ordering = self.resolve_joint_ordering(joint_ordering)
             self.renumber_linksJoints(using_quaternion, resolved_joint_ordering)
             # report joint ordering to user
             self.print_joint_order()
@@ -71,9 +68,7 @@ class URDFParser:
             # None for missing files, bad options, or malformed model fields.
             raise URDFParseError(f"Failed to parse URDF '{filename}': {exc}") from exc
 
-    def resolve_joint_ordering(self, alpha_tie_breaker, joint_ordering):
-        if alpha_tie_breaker is not None:
-            return "alphabetical_order" if alpha_tie_breaker else "urdf_order"
+    def resolve_joint_ordering(self, joint_ordering):
         if joint_ordering not in ("urdf_order", "alphabetical_order", "pinocchio_order"):
             raise ValueError(
                 "joint_ordering must be one of 'urdf_order', 'alphabetical_order', or 'pinocchio_order'"
