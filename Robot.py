@@ -6,16 +6,13 @@ import numpy as np
 
 class Robot:
     # initialization
-    def __init__(self, name, floating_base = False, using_quaternion = True, floating_base_convention = "pinocchio"):
+    def __init__(self, name, floating_base = False, using_quaternion = True):
         self.name = name
         self.floating_base = floating_base
         self.links = []
         self.joints = []
         self.fixed_joints = []
         self.using_quaternion = using_quaternion
-        if floating_base_convention not in ("pinocchio", "legacy"):
-            raise ValueError("floating_base_convention must be 'pinocchio' or 'legacy'")
-        self.floating_base_convention = floating_base_convention
         self.joint_type_by_id = {}
         self.joint_type_by_name = {}
 
@@ -67,75 +64,19 @@ class Robot:
         # floating root 6-wide, spherical/planar 3-wide) as get_joint_index_v.
         return self.get_joint_index_v(joint_id)
 
-    def uses_legacy_floating_base_convention(self):
-        return self.floating_base and self.floating_base_convention == "legacy"
-
-    def get_floating_base_convention(self):
-        return self.floating_base_convention
-
-    def get_floating_base_q_input_permutation_to_internal(self):
-        if not self.uses_legacy_floating_base_convention():
-            return None
-        if self.using_quaternion:
-            return [0, 1, 2, 4, 5, 6, 3]
-        return None
-
-    def get_floating_base_q_output_permutation_from_internal(self):
-        if not self.uses_legacy_floating_base_convention():
-            return None
-        if self.using_quaternion:
-            return [0, 1, 2, 6, 3, 4, 5]
-        return None
-
-    def get_floating_base_v_permutation_to_internal(self):
-        if not self.uses_legacy_floating_base_convention():
-            return None
-        return [3, 4, 5, 0, 1, 2]
-
-    def get_floating_base_v_permutation_from_internal(self):
-        if not self.uses_legacy_floating_base_convention():
-            return None
-        return [3, 4, 5, 0, 1, 2]
-
+    # The floating-base layout is pinocchio's everywhere (q = [xyz, quaternion xyzw,
+    # joints], v = [linear, angular, joints]); the four helpers return a float64 copy.
     def normalize_floating_base_q_input(self, q):
-        q = np.asarray(q, dtype=np.float64).copy()
-        permutation = self.get_floating_base_q_input_permutation_to_internal()
-        if permutation is None:
-            return q
-        if q.shape[0] < len(permutation):
-            raise ValueError("Floating-base quaternion input must have at least 7 entries.")
-        q[: len(permutation)] = q[permutation]
-        return q
+        return np.asarray(q, dtype=np.float64).copy()
 
     def normalize_floating_base_v_input(self, vec):
-        vec = np.asarray(vec, dtype=np.float64).copy()
-        permutation = self.get_floating_base_v_permutation_to_internal()
-        if permutation is None:
-            return vec
-        if vec.shape[0] < len(permutation):
-            raise ValueError("Floating-base velocity-like input must have at least 6 entries.")
-        vec[: len(permutation)] = vec[permutation]
-        return vec
+        return np.asarray(vec, dtype=np.float64).copy()
 
     def denormalize_floating_base_q_output(self, q):
-        q = np.asarray(q, dtype=np.float64).copy()
-        permutation = self.get_floating_base_q_output_permutation_from_internal()
-        if permutation is None:
-            return q
-        if q.shape[0] < len(permutation):
-            raise ValueError("Floating-base quaternion output must have at least 7 entries.")
-        q[: len(permutation)] = q[permutation]
-        return q
+        return np.asarray(q, dtype=np.float64).copy()
 
     def denormalize_floating_base_v_output(self, vec):
-        vec = np.asarray(vec, dtype=np.float64).copy()
-        permutation = self.get_floating_base_v_permutation_from_internal()
-        if permutation is None:
-            return vec
-        if vec.shape[0] < len(permutation):
-            raise ValueError("Floating-base velocity-like output must have at least 6 entries.")
-        vec[: len(permutation)] = vec[permutation]
-        return vec
+        return np.asarray(vec, dtype=np.float64).copy()
 
     #################
     #    Setters    #

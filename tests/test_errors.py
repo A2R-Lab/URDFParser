@@ -95,8 +95,7 @@ def test_missing_robot_element_raises(tmp_path):
         URDFParser().parse(path)
 
 
-@pytest.mark.parametrize("option", [dict(joint_ordering="invalid"),
-                                  dict(floating_base_convention="invalid")])
+@pytest.mark.parametrize("option", [dict(joint_ordering="invalid")])
 def test_invalid_parse_option_is_not_silently_swallowed(tmp_path, option):
     path = _write_urdf(tmp_path, '<joint name="j1" type="revolute">'
                        '<parent link="base"/><child link="l1"/><axis xyz="0 0 1"/>'
