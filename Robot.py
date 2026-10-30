@@ -151,9 +151,10 @@ class Robot:
                 self._dense_q_offset_by_id[joint.jid] = self._dense_q_offset_by_id[tgt]
                 self._dense_v_offset_by_id[joint.jid] = self._dense_v_offset_by_id[tgt]
             else:
-                # Resolution pending or target unparented (mimic of fixed
-                # joint); point at slot 0 so transform-eval q_arg returns a
-                # finite scalar (mimic_offset is applied on top in q_for_joint).
+                # Legacy scatter placeholder, NOT coordinate ownership.
+                # A resolved constant has zero multiplier and q_for_joint
+                # must return its offset without reading this slot (which
+                # does not even exist on a zero-DoF model).
                 self._dense_q_offset_by_id[joint.jid] = 0
                 self._dense_v_offset_by_id[joint.jid] = 0
 
@@ -166,6 +167,10 @@ class Robot:
         i.e. the value the URDF mimic relation prescribes.
         """
         joint = self.get_joint_by_id(jid)
+        if getattr(joint, "is_mimic", False) and (
+            joint.get_mimic_target_id() == -1 or joint.get_mimic_multiplier() == 0.0
+        ):
+            return float(joint.get_mimic_offset())
         inds = self.get_joint_index_q(jid)
         if not isinstance(inds, (list, tuple, np.ndarray)):
             inds = [inds]

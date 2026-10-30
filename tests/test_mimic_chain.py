@@ -137,3 +137,40 @@ def test_chain_onto_mimic_of_fixed_degenerates_to_constant(tmp_path):
     assert j3.mimic_target_id == -1
     # constant = 4.0*0.3 + 0.1 folded into the offset, like the one-hop case
     assert j3.get_mimic_offset() == pytest.approx(1.3)
+
+
+@pytest.mark.parametrize("fixed_first", [True, False])
+@pytest.mark.parametrize("independent", [True, False])
+def test_constant_mimics_never_read_coordinates(tmp_path, fixed_first, independent):
+    """Fixed leaders (including descendants) and chains have no q/v dependence."""
+    fixed = lambda parent, child: (
+        f'<joint name="jf" type="fixed"><parent link="{parent}"/>'
+        f'<child link="{child}"/><origin xyz="0 0 0.1" rpy="0 0 0"/></joint>'
+    )
+    start = _revolute("drive", "base", "l1") if independent else ""
+    root = "l1" if independent else "base"
+    if fixed_first:
+        joints = (fixed(root, "l2")
+                  + _revolute("constant", "l2", "l3", ("jf", -0.5, 0.17))
+                  + _revolute("chained", "l3", "l4", ("constant", 2.0, -0.1)))
+    else:
+        joints = (_revolute("constant", root, "l2", ("jf", -0.5, 0.17))
+                  + _revolute("chained", "l2", "l3", ("constant", 2.0, -0.1))
+                  + fixed("l3", "l4"))
+    # Keep all links connected in the zero-coordinate fixture too.
+    links = '<link name="base"/>' + "".join(
+        f'<link name="l{k}">{_INERTIAL}</link>' for k in range(1 if independent else 2, 5)
+    )
+    path = tmp_path / "constant.urdf"
+    path.write_text(f'<robot name="constant">{links}{start}{joints}</robot>')
+    robot = URDFParser().parse(str(path))
+    assert robot.get_num_pos() == robot.get_num_vel() == int(independent)
+    for name, expected in [("constant", .17), ("chained", .24)]:
+        joint = robot.get_joint_by_name(name)
+        assert joint.get_mimic_target_id() == -1
+        assert joint.get_mimic_multiplier() == 0.0
+        for value in [-.4, .35, np.nan]:
+            q = np.full(robot.get_num_pos(), value)
+            assert robot.q_for_joint(joint.jid, q) == pytest.approx(expected)
+        # No read is permitted even if unrelated coordinates are unavailable.
+        assert robot.q_for_joint(joint.jid, []) == pytest.approx(expected)

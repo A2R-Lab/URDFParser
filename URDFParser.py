@@ -643,7 +643,9 @@ class URDFParser:
                 # mimic_offset and leave mimic_target_id as -1, dof=0.
                 if self.robot.get_fixed_joint_by_name(target_name) is not None:
                     joint.mimic_target_id = -1
-                    joint.mimic_multiplier = multiplier
+                    # This is the resolved derivative with respect to independent
+                    # coordinates, not the raw URDF coefficient of q_fixed=0.
+                    joint.mimic_multiplier = 0.0
                     joint.mimic_offset = offset
                     continue
                 raise MimicResolutionError(
