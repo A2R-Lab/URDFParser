@@ -85,6 +85,7 @@ class URDFParser:
 
     def parse_links(self):
         lid = 0
+        massless = []
         for raw_link in self.soup.find_all('link', recursive=False):
             # construct link object
             curr_link = Link(raw_link["name"],lid)
@@ -92,13 +93,10 @@ class URDFParser:
             # parse inertial properties
             raw_inertial = raw_link.find("inertial")
             if raw_inertial == None:
-                # a warning (not print): normal for the world/base link, worth
-                # surfacing for any other link; strict_inertial escalates the
-                # degenerate-inertia case to an error at validate time.
-                warnings.warn(
-                    "Link [" + curr_link.name + "] does not have inertial properties. "
-                    "Assuming this is the fixed world base frame. Else there is an "
-                    "error with your URDF file.")
+                # Collected into one warning after the loop: normal for the
+                # world/base link and for fixed tool or sensor frames; strict
+                # mode escalates a moving massless body at validate time.
+                massless.append(curr_link.name)
                 curr_link.set_origin_xyz([0, 0, 0])
                 curr_link.set_origin_rpy([0, 0, 0])
                 curr_link.set_inertia(0, 0, 0, 0, 0, 0, 0)
@@ -127,6 +125,12 @@ class URDFParser:
                                       float(raw_inertia["izz"]))
             # store
             self.robot.add_link(copy.deepcopy(curr_link))
+        if massless:
+            warnings.warn(
+                "Links without an <inertial> element are treated as massless: ["
+                + ", ".join(massless) + "]. This is expected for the world base "
+                "and for fixed tool or sensor frames; a moving body without "
+                "inertia is a URDF error, which strict inertial validation raises.")
 
     # Multi-DOF joint types that are DECOMPOSED at parse time into a chain of
     # cardinal 1-DOF sub-joints + zero-mass dummy links (Phase-6 STAGE 3). The
@@ -136,6 +140,7 @@ class URDFParser:
     # 6x3 `Joint.set_type('planar')` representation is retained only as the
     # numpy-reference oracle; the PARSER emits the decomposed chain. SPHERICAL is
     # NOT here (a manifold, cannot decompose -- stage 4).
+
     _DECOMPOSED_JOINT_TYPES = ("planar", "translation", "cartesian")
 
     def parse_joints(self):
