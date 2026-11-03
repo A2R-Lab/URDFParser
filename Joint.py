@@ -98,6 +98,16 @@ class Joint:
         self.mimic_target_id = None
         self.mimic_multiplier = 1.0
         self.mimic_offset = 0.0
+        # Explicit coupling kinds (2026-11-03, closed loops by constraint
+        # embedding). A URDF <mimic> is the "linear" kind, q = m*q_l + o. The
+        # "polynomial" kind (the MuJoCo joint equality, GRiD's
+        # <mimic ... polycoef="c0 c1 c2 c3 c4" q0="..."> extension) is
+        # q = sum_i c_i (q_l - q0)^i, whose multiplier dq/dq_l depends on q_l:
+        # the constant accessors raise for it and consumers read
+        # coupling_alpha(q_l) and its derivatives instead.
+        self.coupling_kind = None
+        self.coupling_coefficients = None
+        self.coupling_q0 = 0.0
 
     def set_id(self, id_in):
         self.jid = id_in
@@ -740,18 +750,96 @@ class Joint:
         self.mimic_joint_name = joint_name
         self.mimic_multiplier = float(multiplier)
         self.mimic_offset = float(offset)
+        self.coupling_kind = "linear"
+        self.coupling_coefficients = None
+        self.coupling_q0 = 0.0
+
+    def set_polynomial_coupling(self, joint_name, polycoef, q0=0.0):
+        """Mark this joint as a polynomial follower of `joint_name`:
+        q = c0 + c1 (q_l - q0) + c2 (q_l - q0)^2 + c3 (q_l - q0)^3 + c4 (q_l - q0)^4
+        (the MuJoCo joint equality). Degree at most four; trailing zeros may be
+        omitted. A polynomial whose degree is at most one is stored as the
+        linear kind (multiplier c1, offset c0 - c1 q0)."""
+        coef = [float(c) for c in polycoef]
+        if len(coef) == 0 or len(coef) > 5:
+            raise ValueError(f"Joint '{self.name}': polycoef takes one to five coefficients, got {len(coef)}")
+        coef = coef + [0.0] * (5 - len(coef))
+        if all(c == 0.0 for c in coef[2:]):
+            self.set_mimic(joint_name, coef[1], coef[0] - coef[1] * float(q0))
+            return
+        self.is_mimic = True
+        self.mimic_joint_name = joint_name
+        self.mimic_multiplier = None
+        self.mimic_offset = None
+        self.coupling_kind = "polynomial"
+        self.coupling_coefficients = coef
+        self.coupling_q0 = float(q0)
 
     def is_mimic_joint(self):
         return self.is_mimic
 
+    def is_linear_coupling(self):
+        """True for a plain URDF mimic (constant multiplier); False for a
+        polynomial follower, whose multiplier varies with the leader."""
+        return self.coupling_kind != "polynomial"
+
+    def get_coupling_kind(self):
+        return self.coupling_kind
+
+    def get_coupling_coefficients(self):
+        return None if self.coupling_coefficients is None else list(self.coupling_coefficients)
+
+    def get_coupling_q0(self):
+        return float(self.coupling_q0)
+
     def get_mimic_joint_name(self):
         return self.mimic_joint_name
 
+    def _require_linear(self, what):
+        if self.coupling_kind == "polynomial":
+            raise TypeError(
+                f"Joint '{self.name}' is a polynomial follower of '{self.mimic_joint_name}'; "
+                f"{what} is not a constant. Read coupling_alpha(q_leader) and its derivatives.")
+
     def get_mimic_multiplier(self):
+        self._require_linear("the mimic multiplier")
         return float(self.mimic_multiplier)
 
     def get_mimic_offset(self):
+        self._require_linear("the mimic offset")
         return float(self.mimic_offset)
+
+    def coupling_value(self, q_leader):
+        """q of this follower for the leader coordinate q_leader (any kind)."""
+        if self.coupling_kind == "polynomial":
+            d = float(q_leader) - self.coupling_q0
+            c = self.coupling_coefficients
+            return c[0] + d * (c[1] + d * (c[2] + d * (c[3] + d * c[4])))
+        return float(self.mimic_multiplier) * float(q_leader) + float(self.mimic_offset)
+
+    def coupling_alpha(self, q_leader):
+        """dq/dq_leader (the fold multiplier) at q_leader."""
+        if self.coupling_kind == "polynomial":
+            d = float(q_leader) - self.coupling_q0
+            c = self.coupling_coefficients
+            return c[1] + d * (2.0 * c[2] + d * (3.0 * c[3] + d * 4.0 * c[4]))
+        return float(self.mimic_multiplier)
+
+    def coupling_alpha_d(self, q_leader):
+        """d^2 q / dq_leader^2 (zero for the linear kind)."""
+        if self.coupling_kind == "polynomial":
+            d = float(q_leader) - self.coupling_q0
+            c = self.coupling_coefficients
+            return 2.0 * c[2] + d * (6.0 * c[3] + d * 12.0 * c[4])
+        return 0.0
+
+    def coupling_alpha_dd(self, q_leader):
+        """d^3 q / dq_leader^3 (zero for the linear kind)."""
+        if self.coupling_kind == "polynomial":
+            d = float(q_leader) - self.coupling_q0
+            c = self.coupling_coefficients
+            return 6.0 * c[3] + d * 24.0 * c[4]
+        return 0.0
 
     def get_mimic_target_id(self):
         return self.mimic_target_id

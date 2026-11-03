@@ -19,6 +19,7 @@ class URDFParser:
         using_quaternion = True,
         joint_ordering = "pinocchio_order",
         strict_inertial = False,
+        reduce_couplings = True,
     ):
         """Parse a tree-structured URDF into a Robot, or raise URDFParseError.
 
@@ -26,8 +27,13 @@ class URDFParser:
         get_num_pos()/get_num_vel() on the result instead of counting joints.
         The default free-flyer uses xyzw quaternions and local linear/angular
         velocities. strict_inertial validates moving-body inertias; root and
-        synthetic decomposition links are exempt.
+        synthetic decomposition links are exempt. reduce_couplings=False keeps
+        every mimic / coupled joint as an independent coordinate (the full
+        spanning tree) and records the couplings on robot.couplings, for the
+        reference's projection of the full tree onto the independent
+        coordinates.
         """
+        self.reduce_couplings = reduce_couplings
         # strict_inertial defaults to False (lenient) to preserve every existing
         # flow: a missing/degenerate <inertial> is silently zeroed as today. When
         # True, a degenerate inertial on a real (non-root, non-dummy) link raises
@@ -241,7 +247,18 @@ class URDFParser:
                     float(raw_mimic["offset"])
                     if raw_mimic.has_attr("offset") else 0.0
                 )
-                curr_joint.set_mimic(mimic_target_name, mimic_multiplier, mimic_offset)
+                if raw_mimic.has_attr("polycoef"):
+                    # GRiD extension (the MuJoCo joint equality): q = sum c_i (q_l - q0)^i.
+                    if raw_mimic.has_attr("multiplier") or raw_mimic.has_attr("offset"):
+                        raise ValueError(
+                            f"Joint '{curr_joint.get_name()}': <mimic polycoef> excludes "
+                            "multiplier/offset (they are the linear polynomial)."
+                        )
+                    polycoef = [float(v) for v in str(raw_mimic["polycoef"]).split()]
+                    q0 = float(raw_mimic["q0"]) if raw_mimic.has_attr("q0") else 0.0
+                    curr_joint.set_polynomial_coupling(mimic_target_name, polycoef, q0)
+                else:
+                    curr_joint.set_mimic(mimic_target_name, mimic_multiplier, mimic_offset)
 
             # store
             self.robot.add_joint(copy.deepcopy(curr_joint))
@@ -564,6 +581,8 @@ class URDFParser:
         self.build_subtree_lists()
         # resolve <mimic> targets now that final jids are stable
         self.resolve_mimic_targets()
+        if not getattr(self, "reduce_couplings", True):
+            self.release_couplings()
         self.robot.refresh_joint_metadata()
         # the renumbered root link is the (intentionally massless) base frame;
         # flag it so strict inertial validation never rejects it.
@@ -620,13 +639,33 @@ class URDFParser:
         raw = {
             j.get_name(): (
                 j.get_mimic_joint_name(),
-                j.get_mimic_multiplier(),
-                j.get_mimic_offset(),
+                j.get_mimic_multiplier() if j.is_linear_coupling() else None,
+                j.get_mimic_offset() if j.is_linear_coupling() else None,
             )
             for j in mimic_joints
         }
         for joint in mimic_joints:
             target_name, multiplier, offset = raw[joint.get_name()]
+            if not joint.is_linear_coupling():
+                # A polynomial follower composes with nothing: its leader must
+                # own a coordinate (no chains through or into a polynomial).
+                if target_name in raw:
+                    raise MimicResolutionError(
+                        f"Joint '{joint.get_name()}' is a polynomial follower of "
+                        f"'{target_name}', which is itself a follower; chains through a "
+                        "polynomial coupling are not supported.")
+                target = self.robot.get_joint_by_name(target_name)
+                if target is None:
+                    raise MimicResolutionError(
+                        f"Joint '{joint.get_name()}' is a polynomial follower of unknown or "
+                        f"fixed joint '{target_name}'.")
+                joint.mimic_target_id = target.get_id()
+                continue
+            if any((not self.robot.get_joint_by_name(n).is_linear_coupling())
+                   for n in [target_name] if n in raw and self.robot.get_joint_by_name(n) is not None):
+                raise MimicResolutionError(
+                    f"Joint '{joint.get_name()}' mimics '{target_name}', a polynomial follower; "
+                    "chains through a polynomial coupling are not supported.")
             visited = {joint.get_name()}
             while target_name in raw:
                 if target_name in visited:
@@ -661,6 +700,19 @@ class URDFParser:
             joint.mimic_target_id = target.get_id()
             joint.mimic_multiplier = multiplier
             joint.mimic_offset = offset
+
+    def release_couplings(self):
+        """Full-tree mode (reduce_couplings=False): every follower becomes an
+        independent joint again and the resolved couplings are recorded on
+        robot.couplings as dicts {follower, leader, kind, multiplier, offset,
+        polycoef, q0} (names and the resolved joint ids), for the projection
+        of the full tree onto the independent coordinates."""
+        records = self.robot.coupling_records()
+        for joint in self.robot.get_joints_ordered_by_id():
+            if getattr(joint, "is_mimic", False):
+                joint.is_mimic = False
+                joint.coupling_kind = None
+        self.robot.couplings = records
 
     def print_joint_order(self):
         print("------------------------------------------")

@@ -15,6 +15,9 @@ class Robot:
         self.using_quaternion = using_quaternion
         self.joint_type_by_id = {}
         self.joint_type_by_name = {}
+        # Full-tree parses (reduce_couplings=False) record the released
+        # couplings here; a reduced parse leaves it empty.
+        self.couplings = []
 
     def next_none(self, iterable):
         try:
@@ -158,6 +161,39 @@ class Robot:
                 self._dense_q_offset_by_id[joint.jid] = 0
                 self._dense_v_offset_by_id[joint.jid] = 0
 
+    def coupling_records(self):
+        """The resolved couplings of this robot's follower joints as dicts
+        {follower, follower_id, leader, leader_id, kind, multiplier, offset,
+        polycoef, q0} (a reduced parse's followers; empty when none)."""
+        records = []
+        for joint in self.get_joints_ordered_by_id():
+            if not getattr(joint, "is_mimic", False):
+                continue
+            linear = joint.is_linear_coupling()
+            records.append({
+                "follower": joint.get_name(), "follower_id": joint.get_id(),
+                "leader": joint.get_mimic_joint_name(), "leader_id": joint.mimic_target_id,
+                "kind": joint.get_coupling_kind(),
+                "multiplier": joint.get_mimic_multiplier() if linear else None,
+                "offset": joint.get_mimic_offset() if linear else None,
+                "polycoef": joint.get_coupling_coefficients(), "q0": joint.get_coupling_q0()})
+        return records
+
+    def full_tree_copy(self):
+        """A deep copy in which every follower joint is an independent joint
+        again (the full spanning tree, nq counting every joint), with the
+        released couplings on its ``couplings`` list. The reference projects
+        this tree onto the reduced coordinates through the couplings."""
+        import copy as _copy
+        full = _copy.deepcopy(self)
+        full.couplings = full.coupling_records()
+        for joint in full.get_joints_ordered_by_id():
+            if getattr(joint, "is_mimic", False):
+                joint.is_mimic = False
+                joint.coupling_kind = None
+        full.refresh_joint_metadata()
+        return full
+
     def q_for_joint(self, jid, q):
         """Return the local-q block (scalar or array) to feed joint `jid`'s
         transform function, accounting for `<mimic>` joints.
@@ -167,7 +203,7 @@ class Robot:
         i.e. the value the URDF mimic relation prescribes.
         """
         joint = self.get_joint_by_id(jid)
-        if getattr(joint, "is_mimic", False) and (
+        if getattr(joint, "is_mimic", False) and joint.is_linear_coupling() and (
             joint.get_mimic_target_id() == -1 or joint.get_mimic_multiplier() == 0.0
         ):
             return float(joint.get_mimic_offset())
@@ -176,7 +212,10 @@ class Robot:
             inds = [inds]
         block = np.asarray(q, dtype=np.float64)[list(inds)]
         if getattr(joint, "is_mimic", False):
-            block = joint.get_mimic_multiplier() * block + joint.get_mimic_offset()
+            if joint.is_linear_coupling():
+                block = joint.get_mimic_multiplier() * block + joint.get_mimic_offset()
+            else:
+                block = np.asarray([joint.coupling_value(float(block[0]))], dtype=np.float64)
         if block.size == 1:
             return float(block[0])
         return block
