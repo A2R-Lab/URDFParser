@@ -6,9 +6,12 @@ import numpy as np
 
 class Robot:
     # initialization
-    def __init__(self, name, floating_base = False, using_quaternion = True):
+    def __init__(self, name, floating_base = False, using_quaternion = True, planar_base = False):
         self.name = name
         self.floating_base = floating_base
+        # True when the parser added the planar_base_joint chain (three scalar
+        # coordinates [px, py, theta]); independent of floating_base.
+        self.planar_base = planar_base
         self.links = []
         self.joints = []
         self.fixed_joints = []

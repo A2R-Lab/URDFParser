@@ -88,6 +88,13 @@ comments there. CI (`.github/workflows/ci.yml`) runs exactly this shape.
   as `URDFParseError`; root/base and synthetic dummy links are exempt. The
   lenient default permits missing inertials and warns. Use strict mode when
   preparing dynamics inputs.
+* `parse(path, planar_base=True)` attaches the URDF root to a `world` link
+  through a planar joint named `planar_base_joint` (plane normal +Z, identity
+  origin), the same model as a URDF that declares that joint. The first three
+  coordinates are `[px, py, theta]`, all unbounded, with the linear velocity in
+  the world frame. It is not a floating base and cannot be combined with
+  `floating_base`. An explicit `world` root must have exactly one child joint,
+  a fixed one, which is replaced.
 * Parse failures raise `URDFParseError`, including missing files, malformed
   model fields, and invalid options. They no longer silently return `None`.
   Wrapped failures preserve the original exception as `__cause__`.

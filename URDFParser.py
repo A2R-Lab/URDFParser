@@ -20,6 +20,7 @@ class URDFParser:
         joint_ordering = "pinocchio_order",
         strict_inertial = False,
         reduce_couplings = True,
+        planar_base = False,
     ):
         """Parse a tree-structured URDF into a Robot, or raise URDFParseError.
 
@@ -31,8 +32,16 @@ class URDFParser:
         every mimic / coupled joint as an independent coordinate (the full
         spanning tree) and records the couplings on robot.couplings, for the
         reference's projection of the full tree onto the independent
-        coordinates.
+        coordinates. planar_base=True attaches the root link to a world link
+        through a planar joint named planar_base_joint (plane normal +Z,
+        identity origin), exactly as if the URDF declared that joint; the
+        coordinates are [px, py, theta] and the robot is not a floating base.
+        It cannot be combined with floating_base.
         """
+        if floating_base and planar_base:
+            raise URDFParseError(
+                "floating_base and planar_base are mutually exclusive: choose "
+                "one base joint for the root link.")
         self.reduce_couplings = reduce_couplings
         # strict_inertial defaults to False (lenient) to preserve every existing
         # flow: a missing/degenerate <inertial> is silently zeroed as today. When
@@ -51,6 +60,7 @@ class URDFParser:
                 self.soup["name"],
                 floating_base,
                 using_quaternion,
+                planar_base = bool(planar_base),
             )
             # collect links
             self.parse_links()
@@ -351,11 +361,24 @@ class URDFParser:
             damping = float(raw_dynamics["damping"]) if raw_dynamics.has_attr("damping") else 0.0
             friction = float(raw_dynamics["friction"]) if raw_dynamics.has_attr("friction") else 0.0
 
+        normal = [0.0, 0.0, 1.0]
+        if jtype == "planar":
+            raw_axis = raw_joint.find("axis")
+            if raw_axis is not None:
+                normal = self.to_float(raw_axis["xyz"])
+        return self._emit_decomposed_chain(
+            name, jtype, parent, child, jid, origin_xyz, origin_rpy,
+            damping, friction, normal)
+
+    def _emit_decomposed_chain(self, name, jtype, parent, child, jid,
+                               origin_xyz, origin_rpy, damping, friction, normal):
+        """Add the sub-joints and dummy links of one decomposed joint to the
+        robot and return the next free joint id. Shared by the URDF path
+        (_decompose_multidof_joint) and by the planar_base option, so the two
+        produce the same chain."""
         # Build the ordered list of (sub-joint type, cardinal axis). The order
         # IS the user-facing (q, v) order.
         if jtype == "planar":
-            raw_axis = raw_joint.find("axis")
-            normal = self.to_float(raw_axis["xyz"]) if raw_axis is not None else [0.0, 0.0, 1.0]
             axis_a, axis_b, axis_n = self._planar_plane_basis(normal)
             steps = [
                 ("prismatic", axis_a),
@@ -561,6 +584,70 @@ class URDFParser:
         self.robot.add_joint(copy.deepcopy(floating_joint))
         return "world" # world link is now the root
 
+    PLANAR_BASE_JOINT_NAME = "planar_base_joint"
+
+    def planar_base_adjust(self, root_link_name):
+        """Attach the root link to a world link through a planar joint named
+        planar_base_joint (plane normal +Z), when the planar_base option is set.
+
+        The chain is emitted by the same routine that decomposes a URDF planar
+        joint, so the result equals a URDF that declares the joint. When the
+        URDF root is already an explicit world link, it must have exactly one
+        child joint and that joint must be fixed; the fixed joint is replaced
+        and its origin is kept on the first sub-joint, as floating_base_adjust
+        keeps it on the floating joint."""
+        if not getattr(self.robot, "planar_base", False):
+            return root_link_name
+        name = self.PLANAR_BASE_JOINT_NAME
+        taken = [j.get_name() for j in self.robot.get_joints_ordered_by_id()
+                 if j.get_name() == name or j.get_name().startswith(name + "__sub")]
+        taken += [l.get_name() for l in self.robot.get_links_ordered_by_id()
+                  if l.get_name().startswith(name + "__dummy")]
+        if taken:
+            raise URDFParseError(
+                f"planar_base=True would add a joint named '{name}', but the URDF "
+                f"already uses {sorted(taken)}. Parse it without planar_base.")
+        next_jid = max([j.get_id() for j in self.robot.get_joints_ordered_by_id()], default=-1) + 1
+        origin_xyz, origin_rpy = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+        if root_link_name == "world":
+            root_children = self.robot.get_joints_by_parent_name("world")
+            if len(root_children) != 1:
+                raise URDFParseError(
+                    "Planar-base conversion for an explicit URDF world root expects "
+                    f"exactly one child joint from 'world', found {len(root_children)}.")
+            base_joint = root_children[0]
+            if base_joint.jtype != "fixed":
+                raise URDFParseError(
+                    "Planar-base conversion for an explicit URDF world root expects the "
+                    f"joint from 'world' to be fixed; '{base_joint.get_name()}' is "
+                    f"{base_joint.jtype}.")
+            child = base_joint.get_child()
+            if child == "world":
+                raise URDFParseError(
+                    "Planar-base conversion encountered an invalid self-loop from 'world' to 'world'.")
+            translation = base_joint.origin.translation
+            rotation = base_joint.origin.rotation
+            origin_xyz = [translation.x, translation.y, translation.z]
+            origin_rpy = [rotation.r, rotation.p, rotation.y]
+            self.robot.remove_joint(base_joint)
+        else:
+            if self.robot.get_link_by_name("world") is not None:
+                raise URDFParseError(
+                    "planar_base=True adds a root link named 'world', but the URDF "
+                    "already has a non-root link with that name.")
+            child = root_link_name
+            world = Link("world", -2) # -2 is temporary and unique
+            world.set_origin_xyz([0, 0, 0])
+            world.set_origin_rpy([0, 0, 0])
+            world.set_inertia(0, 0, 0, 0, 0, 0, 0)
+            # A URDF world link has no <inertial>; record the same absence.
+            world.missing_inertial = True
+            self.robot.add_link(copy.deepcopy(world))
+        self._emit_decomposed_chain(
+            name, "planar", "world", child, next_jid, origin_xyz, origin_rpy,
+            0.0, 0.0, [0.0, 0.0, 1.0])
+        return "world"
+
     def renumber_linksJoints(self, using_quaternion = True, joint_ordering = "pinocchio_order"):
         # find the root link
         link_names = set([link.name for link in self.robot.get_links_ordered_by_id()])
@@ -568,6 +655,8 @@ class URDFParser:
         root_link_name = list(link_names.difference(links_that_are_children))[0]
         # adjust for floating base if applicable
         root_link_name = self.floating_base_adjust(root_link_name, using_quaternion)
+        # adjust for planar base if applicable (exclusive with floating base)
+        root_link_name = self.planar_base_adjust(root_link_name)
         # start renumbering at -1
         self.robot.get_link_by_name(root_link_name).set_id(-1)
         # generate the standard dfs ordering of joints/links
